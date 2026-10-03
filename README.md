@@ -20,7 +20,7 @@ Outcomes are always one of: `allowed`, `redacted`, `blocked`.
 
 | File | What it does |
 
-| `main.py` | Web endpoints |
+| `main.py` | Web endpoints | \\
 | `pipeline.py` | Ordered stages: auth, scan, policy, tokenize, model call, response scan, detokenize |
 | `detection.py` | `detect(text)` and `decide(role, entities)`. Keep these two signatures. |
 | `audit.py` | Hash-chained audit log |
