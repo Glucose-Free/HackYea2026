@@ -16,10 +16,10 @@ Open http://127.0.0.1:8000/docs to try it. Model calls go to a local Ollama serv
 Test users (send as the `X-User-Id` header): `trader_1`, `banker_1`, `compliance_1`.
 Outcomes are always one of: `allowed`, `redacted`, `blocked`.
 
-## Files and owners
+## Files
 
 | File | What it does |
-|---|---|---|
+
 | `main.py` | Web endpoints |
 | `pipeline.py` | Ordered stages: auth, scan, policy, tokenize, model call, response scan, detokenize |
 | `detection.py` | `detect(text)` and `decide(role, entities)`. Keep these two signatures. |
