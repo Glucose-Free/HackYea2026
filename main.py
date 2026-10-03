@@ -3,7 +3,7 @@ from typing import Optional
 from fastapi import FastAPI, Header
 from pydantic import BaseModel
 
-from audit import get_events
+from audit import get_events, verify_chain
 from pipeline import Ctx, run_pipeline
 
 app = FastAPI(title="Wall-Aware AI Gateway")
@@ -37,6 +37,7 @@ def chat(req: ChatRequest, x_user_id: Optional[str] = Header(default=None)):
     }
 
 
-@app.get("/audit")
-def audit():
-    return get_events()
+
+@app.get("/audit/verify")
+def audit_verify():
+    return verify_chain()

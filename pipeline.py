@@ -1,3 +1,4 @@
+import httpx
 import re
 import time
 import uuid
@@ -70,9 +71,34 @@ def tokenize(ctx):
         ctx.outcome = "redacted"
 
 
+SYSTEM_PROMPT = (
+    "You are a helpful assistant at a bank. The user's message may contain "
+    "placeholders like [DEAL_1] that stand in for confidential names. "
+    "Keep each placeholder exactly as written whenever you refer to it. "
+    "Never guess what a placeholder stands for."
+)
+
+
 def call_llm(ctx):
-    # TODO: replace with a real model call (hosted or local)
-    ctx.output = f"(stub LLM) I received: {ctx.sent_to_llm}"
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages.append({"role": "user", "content": ctx.sent_to_llm})
+    try:
+        r = httpx.post(
+            "http://localhost:11434/api/chat",
+            json={
+                "model": "llama3.2:1b",
+                "messages": messages,
+                "stream": False,
+                "keep_alive": "30m",
+                "options": {"num_predict": 150, "num_ctx": 2048},
+                },
+
+            timeout=120,
+        )
+        r.raise_for_status()
+        ctx.output = r.json()["message"]["content"]
+    except Exception:
+        block(ctx, "model unavailable, failed closed")
 
 
 def scan_response(ctx):
