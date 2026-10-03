@@ -23,11 +23,9 @@ Outcomes are always one of: `allowed`, `redacted`, `blocked`.
 | `main.py` | Web endpoints |  
 | `pipeline.py` | Ordered stages: auth, scan, policy, tokenize, model call, response scan, detokenize |  
 | `detection.py` | `detect(text)` and `decide(role, entities)`. Keep these two signatures. |  
-| `audit.py` | Hash-chained audit log |
-
-| `selftest.py` | Attack suite with benign controls |
-
-| `report.py` | Security report and incident reports | 
+| `audit.py` | Hash-chained audit log |  
+| `selftest.py` | Attack suite with benign controls |  
+| `report.py` | Security report and incident reports |  
 
 ## Audit, self-testing and reporting
 
