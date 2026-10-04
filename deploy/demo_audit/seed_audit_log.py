@@ -21,15 +21,14 @@ from gateway.audit.log import EVENT_ID_FORMAT, GENESIS_HASH, AuditLog, classify_
 from gateway.audit.trace import StepOutcome, TraceRecorder, TraceStepKind, build_traceparent, new_span_id, new_trace_id
 from gateway.bootstrap import AUDIT_LOG_PATH_ENV, DEFAULT_AUDIT_LOG_PATH
 from gateway.core.audit_event import build_audit_event
-from deploy.stub_mcp.server import (
-    ALLOWLIST_MIDDLEWARE,
-    ALLOWLIST_PASSED_REASON,
+from examples.bank_demo import (
+    ANALYST_ROLE,
     CONTACT_RULE_ID,
-    DENIAL_TEXT,
-    POLICY_DENIED_REASON,
-    POLICY_MIDDLEWARE,
+    CUSTOMER_CONTACT_TOOL,
+    CUSTOMER_WORKPLACE_TOOL,
     WORKPLACE_RULE_ID,
 )
+from mcp_policy_http_server import PERMISSION_MIDDLEWARE, PERMISSION_PASSED_REASON, POLICY_DENIED_TEXT, POLICY_MIDDLEWARE
 from gateway.core.gateway import FAILED_CLOSED_REASON, REPLY_STEP_OUTCOMES, REQUEST_ID_PREFIX, USER_INPUT_CHECKPOINT_NAME
 from gateway.guards.contract import GuardDecision
 from gateway.guards.pipeline import GuardMode
@@ -64,7 +63,7 @@ SEEDED_MESSAGE = "wrote {count} events to {path}"
 
 BENIGN_TOOLS = ["get_transaction_anomalies", "get_blocked_accounts"]
 AML_SUMMARY_TOOL = "get_aml_case_summary"
-LINKING_TOOLS = [("get_customer_contact", CONTACT_RULE_ID, "contact"), ("get_customer_workplace", WORKPLACE_RULE_ID, "workplace")]
+LINKING_TOOLS = [(CUSTOMER_CONTACT_TOOL, CONTACT_RULE_ID), (CUSTOMER_WORKPLACE_TOOL, WORKPLACE_RULE_ID)]
 BENIGN_PROMPTS = [
     "Show me this week's transaction anomalies.",
     "Which accounts were blocked yesterday?",
@@ -182,26 +181,26 @@ def add_passed_fetch(recorder: TraceRecorder, turn_step_id: str, tool_name: str,
         started_at=at, duration_ms=PASSED_FETCH_DURATION_MS,
     )
     recorder.add_step(
-        TraceStepKind.FETCH_STEP, ALLOWLIST_MIDDLEWARE, StepOutcome.PASSED, parent_step_id=fetch_step_id,
-        reason=ALLOWLIST_PASSED_REASON.format(tool_name=tool_name), started_at=at,
+        TraceStepKind.FETCH_STEP, PERMISSION_MIDDLEWARE, StepOutcome.PASSED, parent_step_id=fetch_step_id,
+        reason=PERMISSION_PASSED_REASON.format(tool_name=tool_name, role=ANALYST_ROLE), started_at=at,
     )
 
 
 def add_denied_fetch(recorder: TraceRecorder, turn_step_id: str, trace_id: str, at: datetime, rng: random.Random) -> None:
-    tool_name, rule_id, knowledge = rng.choice(LINKING_TOOLS)
+    tool_name, rule_id = rng.choice(LINKING_TOOLS)
     fetch_step_id = recorder.add_step(
         TraceStepKind.DATA_FETCH, tool_name, StepOutcome.DENIED, parent_step_id=turn_step_id,
-        reason=DENIAL_TEXT.format(rule_id=rule_id, knowledge=knowledge),
+        reason=POLICY_DENIED_TEXT.format(rule_ids=rule_id),
         detail={"arguments": {"customer_id": DEMO_CUSTOMER_ID}, "traceparent": build_traceparent(trace_id, new_span_id()), "result_chars": 0},
         started_at=at, duration_ms=DENIED_FETCH_DURATION_MS,
     )
     recorder.add_step(
-        TraceStepKind.FETCH_STEP, ALLOWLIST_MIDDLEWARE, StepOutcome.PASSED, parent_step_id=fetch_step_id,
-        reason=ALLOWLIST_PASSED_REASON.format(tool_name=tool_name), started_at=at,
+        TraceStepKind.FETCH_STEP, PERMISSION_MIDDLEWARE, StepOutcome.PASSED, parent_step_id=fetch_step_id,
+        reason=PERMISSION_PASSED_REASON.format(tool_name=tool_name, role=ANALYST_ROLE), started_at=at,
     )
     recorder.add_step(
         TraceStepKind.FETCH_STEP, POLICY_MIDDLEWARE, StepOutcome.DENIED, parent_step_id=fetch_step_id,
-        reason=POLICY_DENIED_REASON.format(rule_id=rule_id, knowledge=knowledge), started_at=at,
+        reason=rule_id, started_at=at,
     )
 
 

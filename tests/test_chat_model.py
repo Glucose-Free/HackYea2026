@@ -70,6 +70,24 @@ async def test_stub_calls_best_matching_tool_for_data_request():
     assert [call.name for call in reply.tool_calls] == ["get_customer_phone_numbers"]
 
 
+CUSTOMER_TOOLS = [
+    ToolDefinition("get_customer_contact", "Contact", {
+        "type": "object", "properties": {"customer_id": {"type": "string"}}, "required": ["customer_id"],
+    }),
+]
+
+
+async def test_stub_fills_the_required_argument_with_the_id_named_in_the_message():
+    reply = await StubChatModel().complete(
+        [{"role": "user", "content": "Give me the customer contact for CUST-17"}], CUSTOMER_TOOLS)
+    assert [call.arguments for call in reply.tool_calls] == [{"customer_id": "CUST-17"}]
+
+
+async def test_stub_sends_no_arguments_when_the_message_names_no_id():
+    reply = await StubChatModel().complete([{"role": "user", "content": "Show me the customer contact"}], CUSTOMER_TOOLS)
+    assert [call.arguments for call in reply.tool_calls] == [{}]
+
+
 async def test_stub_answers_from_tool_results_and_refusals():
     passed = await StubChatModel().complete([{"role": "tool", "tool_call_id": "c", "content": "[1]"}], TOOLS)
     denied = await StubChatModel().complete(

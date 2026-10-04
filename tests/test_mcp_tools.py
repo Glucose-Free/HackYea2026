@@ -8,6 +8,7 @@ from gateway.agent.tools import (
     USER_ID_META_KEY,
     McpToolProvider,
     ToolCallContext,
+    ToolCallOutcome,
     ToolCaller,
 )
 
@@ -41,6 +42,11 @@ def build_test_server(received_meta: list) -> MCPServer:
             ]},
         )
 
+    @server.tool()
+    def get_missing_record() -> CallToolResult:
+        """Fails without any policy decision."""
+        return CallToolResult(content=[TextContent(type="text", text="no such record")], is_error=True)
+
     return server
 
 
@@ -48,7 +54,7 @@ async def test_lists_tools_with_schemas():
     async with McpToolProvider(build_test_server([])).open_session() as session:
         tools = await session.list_tools()
     by_name = {tool.name: tool for tool in tools}
-    assert set(by_name) == {"list_transactions", "echo_caller", "get_phone_numbers"}
+    assert set(by_name) == {"list_transactions", "echo_caller", "get_phone_numbers", "get_missing_record"}
     assert by_name["list_transactions"].description == "List recent transactions."
     assert "limit" in by_name["list_transactions"].input_schema["properties"]
 
@@ -70,6 +76,14 @@ async def test_denied_call_returns_refusal_text_and_checkpoint_steps():
         ("query_allowlist", "passed"),
         ("inference_guard", "denied"),
     ]
+
+
+async def test_error_without_a_denied_checkpoint_step_is_a_failure_not_a_denial():
+    async with McpToolProvider(build_test_server([])).open_session() as session:
+        result = await session.call_tool("get_missing_record", {}, CALL_CONTEXT)
+    assert result.outcome is ToolCallOutcome.FAILED
+    assert not result.denied
+    assert result.content == "no such record"
 
 
 def test_traceparent_meta_key_is_w3c_name():

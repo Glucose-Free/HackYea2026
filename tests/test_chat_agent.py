@@ -2,7 +2,15 @@ import pytest
 
 from gateway.agent.chat_agent import SYSTEM_PROMPT, ChatAgent, ToolRoundLimitExceededError
 from gateway.agent.chat_model import ChatModelError
-from gateway.agent.tools import DENIED_TOOL_RESULT_PREFIX, CheckpointStep, ToolCallResult, ToolCaller, ToolDefinition
+from gateway.agent.tools import (
+    DENIED_TOOL_RESULT_PREFIX,
+    FAILED_TOOL_RESULT_PREFIX,
+    CheckpointStep,
+    ToolCallOutcome,
+    ToolCallResult,
+    ToolCaller,
+    ToolDefinition,
+)
 from gateway.audit.trace import StepOutcome, TraceRecorder, TraceStepKind
 from gateway.core.conversation import Conversation, Message
 from tests.fakes import FakeChatModel, FakeToolProvider, build_answer_reply, build_tool_call_reply
@@ -58,7 +66,7 @@ async def test_runs_tool_then_answers_and_records_fetch_with_traceparent():
 
 
 async def test_denied_fetch_is_sent_to_model_with_prefix_and_checkpoint_steps_recorded():
-    denied = ToolCallResult("inference risk", True, (
+    denied = ToolCallResult("inference risk", ToolCallOutcome.DENIED, (
         CheckpointStep("allowlist", "passed", "ok"),
         CheckpointStep("inference_guard", "denied", "dates + phones"),
     ))
@@ -105,3 +113,17 @@ async def test_tool_transport_error_is_recorded_as_failed_fetch_and_propagates()
         await ChatAgent(chat_model, FakeToolProvider(error=ConnectionError("mcp down")), 8).reply(build_conversation(), recorder, root, TRACE_ID, CALLER)
     assert recorder.steps[-1].kind is TraceStepKind.DATA_FETCH
     assert recorder.steps[-1].outcome is StepOutcome.FAILED
+
+
+async def test_failed_fetch_is_sent_to_model_as_a_failure_and_recorded_as_failed():
+    tool_provider = FakeToolProvider(
+        tools=[ToolDefinition("get_phones", "p", {"type": "object", "properties": {}})],
+        results_by_name={"get_phones": ToolCallResult("no such record", ToolCallOutcome.FAILED, ())},
+    )
+    chat_model = FakeChatModel([build_tool_call_reply("get_phones"), build_answer_reply("Not found")])
+    recorder, root = start_trace()
+    await ChatAgent(chat_model, tool_provider, 8).reply(build_conversation(), recorder, root, TRACE_ID, CALLER)
+
+    assert chat_model.received_messages[1][-1]["content"] == FAILED_TOOL_RESULT_PREFIX + "no such record"
+    fetch_step = next(step for step in recorder.steps if step.kind is TraceStepKind.DATA_FETCH)
+    assert fetch_step.outcome is StepOutcome.FAILED and fetch_step.reason == "no such record"

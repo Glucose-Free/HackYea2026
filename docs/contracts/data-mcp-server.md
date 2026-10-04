@@ -2,7 +2,7 @@
 
 What the gateway expects from the data MCP server (checkpoint 2, the black box), and what it sends. Anything not listed here is up to the server.
 
-Status: proposed by the gateway side on 2026-10-04, against the policy middleware in commit `50e32de`.
+Status: implemented by `mcp_policy_http_server.py` with the tools in `examples/bank_demo.py` (the `data-mcp` service). The tool table below shows fact names from the original proposal; the implemented facts are `aml_review`, `contact_data` and `workplace_data`, keyed by customer id.
 
 ## How the gateway uses the server
 
@@ -14,7 +14,7 @@ Open WebUI ─▶ gateway ─▶ checkpoint 1 (Jev) ─▶ chat model ──tool
 
 - The chat model sees every tool the server lists and decides which to call. **Every listed tool is reachable by a possibly prompt-injected model.**
 - The gateway opens one MCP session per chat request, lists the tools, makes the calls, and closes the session.
-- The stand-in server `deploy/stub_mcp/server.py` implements this contract with fake data. The real server replaces it by changing one image in `docker-compose.yml`.
+- `python -m deploy.policy_mcp.server` runs the policy engine as this server, with fake data.
 
 ## 1. Transport
 
@@ -78,18 +78,17 @@ CallToolResult(
 ```
 
 - `outcome` is `passed` or `denied`. List the middleware in the order it ran.
-- A `block` from `PolicyMiddleware.decide()` maps directly: `reason` becomes the denied step's reason, and `tags` can go into it as well.
+- A policy `block` from `PolicyMiddleware.handle()` carries `violated_rule_ids` (audit only, not in `as_dict()`); they become the denied step's reason.
 - **Why it matters:**
-  - The gateway counts a fetch as denied only when `isError` is true. A block returned as normal JSON text counts as a **passed** fetch in the dashboard.
+  - The gateway counts a fetch as denied only when `isError` is true **and** `checkpoint_steps` holds a `denied` step. A block returned as normal JSON text counts as a **passed** fetch; an `isError` without a denied step counts as a **failed** fetch, which the model may retry.
   - `checkpoint_steps` is what makes the dashboard's request trace end at *your* middleware, not just at "tool refused".
   - The model is told the request was denied and not to work around it.
-- **Known overlap:** the gateway also counts other `isError` results (unknown tool, bad arguments) as denials. If you can, include `checkpoint_steps` only on real policy denials; the gateway may later use their presence to tell the two apart.
+- Only real policy denials should carry a `denied` step; unknown tools, bad arguments and missing records should not.
 
 ## 5. Order inside a data tool
 
 1. Read the caller from `_meta`. Deny if it is missing.
 2. Build the `MCPRequest` and call `PolicyMiddleware.handle()`.
-   - Note: `handle()` records the tool's facts *before* deciding. If a call is blocked, its facts are still stored, e.g. `contact_data` for a contact request that was denied. Decide whether that is intended. Usually facts should be stored only for data actually returned.
 3. On `block`, return the denied result above without running SQL.
 4. On `allow`, run the predefined SQL and return the rows.
 
@@ -102,8 +101,8 @@ CallToolResult(
 
 ## Checklist
 
-- [ ] SDK-based server over streamable HTTP on port 8001
-- [ ] Only the five data tools listed; rule management and `evaluate_request` removed from the model-facing server
-- [ ] User and session read from `_meta`; deny when the user is missing
-- [ ] Denials use `isError: true` and `checkpoint_steps`
-- [ ] `mcp.py` renamed; SQLite file untracked and kept on a volume
+- [x] SDK-based server over streamable HTTP on port 8001
+- [x] Only the five data tools listed; rule management and `evaluate_request` removed from the model-facing server
+- [x] User and session read from `_meta`; deny when the user is missing
+- [x] Denials use `isError: true` and `checkpoint_steps`
+- [ ] `mcp.py` renamed (done); SQLite file kept on a volume (done) but `policy_knowledge.sqlite3` is still tracked

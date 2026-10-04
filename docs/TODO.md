@@ -7,16 +7,10 @@ What is left, by priority. Update it as items land. Design: `docs/superpowers/sp
 - [ ] Merge `origin/main` (the policy engine, `50e32de`) into `feat/ai-control-layer`. Expect a conflict in `README.md`: keep ours and add a short paragraph on the policy engine.
 - [ ] Rebuild and smoke-test the stack: `docker compose up --build`. Then log in at http://localhost:3000 and run the README demo script. The image has never been built from the current code.
 - [ ] Push the branch and open a PR.
-- [ ] Before showing it to anyone, replace the demo secrets in `.env` (`GATEWAY_API_KEY`, `REPORT_ACCESS_TOKEN`, `WEBUI_SECRET_KEY`, passwords).
-- [ ] Bring the data MCP server in line with `docs/contracts/data-mcp-server.md`:
-  - [ ] Rename `mcp.py` (it shadows the `mcp` SDK package and breaks the gateway when run from the repo root).
-  - [ ] Rebuild the server on the MCP SDK, served over streamable HTTP on port 8001.
-  - [ ] List only the five data tools; take rule management and `evaluate_request` off the model-facing server.
-  - [ ] Read the user and session from `_meta`, and deny when the user is missing.
-  - [ ] Return denials with `isError: true` and `checkpoint_steps`.
-  - [ ] Decide whether facts from a blocked call should be stored (`PolicyMiddleware.handle()` stores them before deciding).
-  - [ ] Untrack `policy_knowledge.sqlite3`, keep the DB on a volume, and don't create it at import time.
-- [ ] Replace the `data-mcp` stub service in `docker-compose.yml` with the real server, run the demo script against it, and delete `deploy/stub_mcp/` or keep it only for tests.
+- [ ] Before showing it to anyone, replace the demo secrets in `.env` (the gateway now logs a warning while they are in use) (`GATEWAY_API_KEY`, `REPORT_ACCESS_TOKEN`, `WEBUI_SECRET_KEY`, passwords).
+- [x] Bring the data MCP server in line with `docs/contracts/data-mcp-server.md` (`mcp_policy_http_server.py`, `deploy/policy_mcp/`).
+- [ ] Untrack `policy_knowledge.sqlite3` and add `*.sqlite3` to `.gitignore`.
+- [x] Replace the `data-mcp` stub service in `docker-compose.yml` with the real server, and delete `deploy/stub_mcp/`.
 - [ ] Switch to real services once keys exist: `[jev] adapter = "typesafe"` and `[chat_model] adapter = "openai_compatible"` in `config/gateway.toml`, keys in `.env`. Then tune the Jev check wording and `refuse_threshold` on real prompts, including benign ones that mention rules or policies.
 
 ## Next: the dashboard
@@ -46,7 +40,7 @@ Accepted for the demo; listed in the README.
 
 - [ ] An admin query with `end` near year 1 returns 500 (`OverflowError` in `build_time_range`); it should return 400.
 - [ ] A non-ASCII API key or report token returns 500 (`compare_digest` on `str`); compare UTF-8 bytes instead.
-- [ ] Every MCP `isError` (unknown tool, bad arguments) counts as a checkpoint-2 denial. Treat a result as a denial only when `checkpoint_steps` contains a `denied` step; otherwise let the model retry.
+- [x] Every MCP `isError` (unknown tool, bad arguments) counts as a checkpoint-2 denial. Treat a result as a denial only when `checkpoint_steps` contains a `denied` step; otherwise let the model retry.
 - [ ] Audit readers don't take the write lock, so a large event being written can briefly show the chain as broken.
 - [ ] An event id can repeat after a corrupt log line (`_count` skips unreadable lines).
 - [ ] Coding-guideline nits:

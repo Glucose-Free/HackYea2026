@@ -2,7 +2,6 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Protocol
 
 from gateway.agent.chat_agent import ChatAgent
@@ -21,6 +20,7 @@ USER_INPUT_CHECKPOINT_NAME = "user_input"
 REQUEST_ID_PREFIX = "req_"
 REQUEST_ID_HEX_LENGTH = 12
 FAILED_CLOSED_REASON = "failed closed: {error_type}"
+GATEWAY_NON_ANSWER_TEXTS = frozenset({REFUSAL_TEXT, FAILED_CLOSED_TEXT})
 AUDIT_WRITE_FAILED_MESSAGE = "audit write failed for %s"
 REQUEST_FAILED_MESSAGE = "request %s failed closed"
 REPLY_STEP_OUTCOMES = {
@@ -88,7 +88,8 @@ class Gateway:
             record_checkpoint(recorder, root_step_id, USER_INPUT_CHECKPOINT_NAME, verdict)
             if verdict.refused:
                 return ReplyDecision(ReplyOutcome.REFUSED, REFUSAL_TEXT, get_refusal_reason(verdict))
-            agent_reply = await self._chat_agent.reply(conversation, recorder, root_step_id, trace_id, caller)
+            model_turns = conversation.get_model_turns(GATEWAY_NON_ANSWER_TEXTS)
+            agent_reply = await self._chat_agent.reply(model_turns, recorder, root_step_id, trace_id, caller)
             return ReplyDecision(ReplyOutcome.ANSWERED, agent_reply.answer, "")
         except Exception as error:
             logger.exception(REQUEST_FAILED_MESSAGE, request_id)

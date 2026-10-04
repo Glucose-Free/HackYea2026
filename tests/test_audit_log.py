@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from gateway.audit.log import AuditLog, classify_event
+from gateway.audit.log import AuditAnchorFile, AuditLog, classify_event
 
 
 def test_append_links_events_and_chain_verifies(tmp_path: Path):
@@ -92,3 +92,73 @@ def test_non_object_lines_do_not_break_startup_or_verification(tmp_path: Path):
     assert audit_log.append({"outcome": "answered"})["event_id"] == "evt_00001"
     verification = audit_log.verify_chain()
     assert not verification.intact and verification.first_broken == "line 1"
+
+
+def open_anchored_log(tmp_path: Path) -> AuditLog:
+    return AuditLog(tmp_path / "audit.jsonl", AuditAnchorFile(tmp_path / "anchor" / "audit.anchor.json"))
+
+
+def write_three_events(tmp_path: Path) -> list[str]:
+    audit_log = open_anchored_log(tmp_path)
+    for request_id in ("r1", "r2", "r3"):
+        audit_log.append({"request_id": request_id, "outcome": "answered"})
+    return (tmp_path / "audit.jsonl").read_text().splitlines()
+
+
+def test_anchored_log_stays_intact_across_restarts(tmp_path: Path):
+    write_three_events(tmp_path)
+    reopened = open_anchored_log(tmp_path)
+    reopened.append({"request_id": "r4", "outcome": "answered"})
+    verification = open_anchored_log(tmp_path).verify_chain()
+    assert verification.intact and verification.checked == 4
+
+
+def test_cut_off_tail_is_detected_after_a_restart(tmp_path: Path):
+    lines = write_three_events(tmp_path)
+    (tmp_path / "audit.jsonl").write_text(lines[0] + "\n")
+
+    verification = open_anchored_log(tmp_path).verify_chain()
+
+    assert not verification.intact
+    assert verification.first_broken == "evt_00003"
+
+
+def test_emptied_log_is_detected(tmp_path: Path):
+    write_three_events(tmp_path)
+    (tmp_path / "audit.jsonl").write_text("")
+    assert not open_anchored_log(tmp_path).verify_chain().intact
+
+
+def test_appending_after_a_cut_off_tail_does_not_hide_it(tmp_path: Path):
+    lines = write_three_events(tmp_path)
+    (tmp_path / "audit.jsonl").write_text(lines[0] + "\n")
+    reopened = open_anchored_log(tmp_path)
+    for request_id in ("r5", "r6", "r7"):
+        reopened.append({"request_id": request_id, "outcome": "answered"})
+
+    assert not open_anchored_log(tmp_path).verify_chain().intact
+
+
+def test_consistently_rehashed_chain_is_detected(tmp_path: Path):
+    lines = write_three_events(tmp_path)
+    forged_log = tmp_path / "forged.jsonl"
+    forger = AuditLog(forged_log)
+    for line in lines:
+        event = json.loads(line)
+        forger.append({"request_id": event["request_id"], "outcome": "refused"})
+    (tmp_path / "audit.jsonl").write_bytes(forged_log.read_bytes())
+
+    verification = open_anchored_log(tmp_path).verify_chain()
+
+    assert not verification.intact
+    assert verification.first_broken == "evt_00003"
+
+
+def test_log_written_before_anchoring_is_adopted_on_first_open(tmp_path: Path):
+    unanchored = AuditLog(tmp_path / "audit.jsonl")
+    unanchored.append({"request_id": "r1", "outcome": "answered"})
+
+    adopted = open_anchored_log(tmp_path)
+    adopted.append({"request_id": "r2", "outcome": "answered"})
+
+    assert open_anchored_log(tmp_path).verify_chain().intact
