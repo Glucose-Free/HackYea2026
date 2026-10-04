@@ -18,6 +18,8 @@ INVERTED_RANGE_ERROR = "start must be before end"
 TOO_MANY_BUCKETS_ERROR = "range would produce {count} buckets; the maximum is {maximum}"
 INVALID_CURSOR_ERROR = "cursor {cursor!r} is not valid"
 UNREADABLE_EVENT_MESSAGE = "skipping unreadable audit event %s"
+# Written by Gateway on the user_prompt step; it is what the user asked the assistant to do.
+PROMPT_DETAIL_KEY = "message"
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +27,14 @@ logger = logging.getLogger(__name__)
 class TimeBucket(StrEnum):
     HOUR = "hour"
     DAY = "day"
+
+
+class RequestStatus(StrEnum):
+    """How much of what the user asked for got through, as the dashboard's donut shows it."""
+
+    PASSED = "passed"
+    PARTIALLY_PASSED = "partially_passed"
+    BLOCKED = "blocked"
 
 
 class InvalidTimeRangeError(ValueError):
@@ -80,6 +90,8 @@ class RequestSummary:
     occurred_at: datetime
     outcome: ReplyOutcome
     denied_at: DeniedAt | None
+    status: RequestStatus
+    prompt: str
     reason: str
     passed_fetches: int
     denied_fetches: int
@@ -90,6 +102,7 @@ class RequestFilters:
     user_id: str | None = None
     outcome: ReplyOutcome | None = None
     denied_at: DeniedAt | None = None
+    status: RequestStatus | None = None
     time_range: TimeRange | None = None
     only_problems: bool = False
 
@@ -107,15 +120,23 @@ class RequestPage:
 
 
 @dataclass(frozen=True)
+class RequestStatusCounts:
+    passed: int
+    partially_passed: int
+    blocked: int
+
+
+@dataclass(frozen=True)
 class RequestTrace:
     summary: RequestSummary
     steps: list[TraceStep]
 
 
 class AuditQuery(Protocol):
-    def get_fetch_totals(self, time_range: TimeRange, bucket: TimeBucket) -> list[FetchTotalsBucket]: ...
+    def get_fetch_totals(self, time_range: TimeRange, bucket: TimeBucket, *, user_id: str | None = None) -> list[FetchTotalsBucket]: ...
     def list_user_fetch_stats(self, time_range: TimeRange) -> list[UserFetchStats]: ...
     def list_requests(self, filters: RequestFilters, page: PageRequest) -> RequestPage: ...
+    def get_request_status_counts(self, time_range: TimeRange) -> RequestStatusCounts: ...
     def get_request_trace(self, request_id: str) -> RequestTrace | None: ...
 
 
@@ -173,16 +194,36 @@ def extract_fetch_attempts(event: dict[str, Any]) -> list[FetchAttempt]:
     return attempts
 
 
+# Failed-closed requests count as blocked: the user got no answer, even though no guard denied anything.
+def get_request_status(outcome: ReplyOutcome, denied_at: DeniedAt | None) -> RequestStatus:
+    if outcome is not ReplyOutcome.ANSWERED:
+        return RequestStatus.BLOCKED
+    if denied_at is DeniedAt.CHECKPOINT_2:
+        return RequestStatus.PARTIALLY_PASSED
+    return RequestStatus.PASSED
+
+
+def get_event_prompt(event: dict[str, Any]) -> str:
+    for raw_step in event.get("steps", []):
+        if raw_step.get("kind") == TraceStepKind.USER_PROMPT:
+            return (raw_step.get("detail") or {}).get(PROMPT_DETAIL_KEY, "")
+    return ""
+
+
 def build_request_summary(event: dict[str, Any]) -> RequestSummary:
     user = event.get("user", {})
     fetches = event.get("fetches", {})
+    outcome = ReplyOutcome(event["outcome"])
+    denied_at = get_event_denied_at(event)
     return RequestSummary(
         request_id=event.get("request_id", ""),
         user_id=user.get("id", ""),
         user_name=user.get("name", ""),
         occurred_at=get_event_time(event),
-        outcome=ReplyOutcome(event["outcome"]),
-        denied_at=get_event_denied_at(event),
+        outcome=outcome,
+        denied_at=denied_at,
+        status=get_request_status(outcome, denied_at),
+        prompt=get_event_prompt(event),
         reason=event.get("reason", ""),
         passed_fetches=fetches.get("passed", 0),
         denied_fetches=fetches.get("denied", 0),
@@ -195,6 +236,8 @@ def matches_filters(summary: RequestSummary, filters: RequestFilters) -> bool:
     if filters.outcome is not None and summary.outcome is not filters.outcome:
         return False
     if filters.denied_at is not None and summary.denied_at is not filters.denied_at:
+        return False
+    if filters.status is not None and summary.status is not filters.status:
         return False
     if filters.only_problems and summary.denied_at is None and summary.outcome is not ReplyOutcome.FAILED_CLOSED:
         return False
@@ -231,10 +274,12 @@ class JsonlAuditQuery:
     def __init__(self, audit_log: AuditLog):
         self._audit_log = audit_log
 
-    def get_fetch_totals(self, time_range: TimeRange, bucket: TimeBucket) -> list[FetchTotalsBucket]:
+    def get_fetch_totals(self, time_range: TimeRange, bucket: TimeBucket, *, user_id: str | None = None) -> list[FetchTotalsBucket]:
         bucket_starts = build_bucket_starts(time_range, bucket)
         counts: dict[datetime, list[int]] = {bucket_start: [0, 0, 0] for bucket_start in bucket_starts}
         for attempt in self._list_fetch_attempts(time_range):
+            if user_id is not None and attempt.user_id != user_id:
+                continue
             bucket_counts = counts[floor_to_bucket(attempt.occurred_at, bucket)]
             bucket_counts[get_attempt_column(attempt)] += 1
         return [FetchTotalsBucket(bucket_start, *counts[bucket_start]) for bucket_start in bucket_starts]
@@ -263,6 +308,15 @@ class JsonlAuditQuery:
         items = summaries[offset:offset + page.limit]
         next_offset = offset + page.limit
         return RequestPage(items, str(next_offset) if next_offset < len(summaries) else None)
+
+    def get_request_status_counts(self, time_range: TimeRange) -> RequestStatusCounts:
+        filters = RequestFilters(time_range=time_range)
+        statuses = [summary.status for summary in self._list_summaries_newest_first() if matches_filters(summary, filters)]
+        return RequestStatusCounts(
+            passed=statuses.count(RequestStatus.PASSED),
+            partially_passed=statuses.count(RequestStatus.PARTIALLY_PASSED),
+            blocked=statuses.count(RequestStatus.BLOCKED),
+        )
 
     def get_request_trace(self, request_id: str) -> RequestTrace | None:
         for event in self._read_valid_events():

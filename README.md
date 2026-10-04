@@ -61,15 +61,34 @@ The same type can appear several times, for example one instance enforcing and a
 my_guard = "my_package.guards:MyGuard"
 ```
 
+## Security dashboard
+
+Open http://localhost:8000/dashboard/ and sign in with the report token (`REPORT_ACCESS_TOKEN`). The token is kept in the tab's session storage and sent as the `X-Report-Token` header.
+
+- **Users stats:** every user with fetch attempts, sorted by denial share, with a per-hour breakdown of passed fetches and denials at each checkpoint, plus their recent requests. A red marker means at least 25% of a user's attempts were denied; yellow means some were.
+- **Requests status:** totals, audit-chain integrity, fetches over time, and a filterable request list. Click a request to see its full trace.
+- **Data retrievals:** a donut of requests by status. Click a slice (or its *Details* button) to list those requests, with user, time and the user's prompt; click the centre to list all of them. Click a request to see its trace. Statuses: *passed* (answered, nothing denied), *partially passed* (answered, but checkpoint 2 denied at least one fetch) and *blocked* (refused at checkpoint 1, or failed closed).
+
+The page is static files served by the gateway (`gateway/dashboard/`) and reads only the API below. It refreshes every 15 seconds.
+
+To fill an empty audit log with a week of demo traffic, run this with the gateway stopped. The seeder refuses a log that already has events.
+
+```
+docker compose run --rm --no-deps gateway python deploy/demo_audit/seed_audit_log.py
+```
+
+The data is generated relative to when the script runs, so it slides out of the 24-hour view after a day. To reseed, remove the volume with `docker compose down -v`; this also resets Open WebUI.
+
 ## Dashboard API
 
 All endpoints except `/audit/verify` need the report token, sent as the `X-Report-Token` header or `?token=`.
 
 | Endpoint | Returns |
 |---|---|
-| `GET /admin/fetches/totals?start&end&bucket=hour\|day` | passed/denied data fetches over time, split by checkpoint |
+| `GET /admin/fetches/totals?start&end&bucket=hour\|day&user_id` | passed/denied data fetches over time, split by checkpoint, optionally for one user |
 | `GET /admin/users/fetch-stats?start&end` | users with fetch attempts and their passed/denied counts |
-| `GET /admin/requests?user_id&outcome&denied_at&start&end&cursor&limit` | paged request list, newest first |
+| `GET /admin/requests?user_id&outcome&denied_at&status&start&end&cursor&limit` | paged request list, newest first; `status` is `passed`, `partially_passed` or `blocked` |
+| `GET /admin/requests/status-counts?start&end` | number of requests in each status |
 | `GET /admin/requests/{request_id}/trace` | the full step tree of one request |
 | `GET /audit/verify` | hash-chain integrity (public) |
 

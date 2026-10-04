@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>aware — AI control dashboard</title>
+  <link rel="stylesheet" href="dashboard.css">
+  <script type="module" src="dashboard.js"></script>
+</head>
+<body>
+  <div class="layout">
+    <nav class="sidebar">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+          <rect x="2" y="2" width="36" height="36" fill="none" stroke="currentColor" stroke-width="2.5"/>
+          <path d="M9 9l8 8M31 9l-8 8M9 31l8-8M31 31l-8-8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+          <path d="M9 9h5M9 9v5M31 9h-5M31 9v5M9 31h5M9 31v-5M31 31h-5M31 31v-5" stroke="currentColor" stroke-width="2.5"/>
+        </svg>
+        <span class="brand-name">aware</span>
+      </div>
+      <a class="nav-link" href="#requests" data-view="requests">Requests status</a>
+      <a class="nav-link" href="#users" data-view="users">Users stats</a>
+      <a class="nav-link" href="#retrievals" data-view="retrievals">Data retrievals</a>
+      <div class="sidebar-footer">
+        <span id="refresh-status" class="muted"></span>
+        <button id="sign-out" class="link-button" type="button">Sign out</button>
+      </div>
+    </nav>
+
+    <main class="content">
+      <section id="view-users" class="view" hidden>
+        <h1>Users stats</h1>
+        <div class="filters">
+          <label class="filter search-filter">
+            <span class="filter-label">Search</span>
+            <span class="search-box">
+              <input id="user-search" type="search" placeholder="Name, email or id" autocomplete="off">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="13" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="2.5"/><path d="M8.5 14.5L3 20" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
+            </span>
+          </label>
+          <label class="filter">
+            <span class="filter-label">Sort by</span>
+            <select id="user-sort"></select>
+          </label>
+          <label class="filter">
+            <span class="filter-label">Time range</span>
+            <select class="range-select"></select>
+          </label>
+        </div>
+        <div class="users-grid">
+          <div class="card user-list-card">
+            <ul id="user-list" class="user-list"></ul>
+            <p id="user-list-empty" class="muted empty" hidden>No fetch attempts in this range.</p>
+          </div>
+          <div class="card user-detail-card">
+            <div id="user-detail"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-requests" class="view" hidden>
+        <h1>Requests status</h1>
+        <div class="filters">
+          <label class="filter">
+            <span class="filter-label">Time range</span>
+            <select class="range-select"></select>
+          </label>
+          <label class="filter">
+            <span class="filter-label">User</span>
+            <select id="request-user-filter"></select>
+          </label>
+        </div>
+        <div id="stat-tiles" class="stat-tiles"></div>
+        <div class="card">
+          <h2>Data fetches over time</h2>
+          <div id="totals-chart"></div>
+        </div>
+        <div class="card">
+          <h2>Requests</h2>
+          <div class="filters">
+            <label class="filter">
+              <span class="filter-label">Outcome</span>
+              <select id="request-outcome-filter"></select>
+            </label>
+            <label class="filter">
+              <span class="filter-label">Denied at</span>
+              <select id="request-denied-at-filter"></select>
+            </label>
+          </div>
+          <div id="request-table" class="request-table-wrapper"></div>
+          <button id="load-more-requests" class="secondary-button" type="button" hidden>Load more</button>
+        </div>
+      </section>
+
+      <section id="view-retrievals" class="view" hidden>
+        <h1>Data retrievals</h1>
+        <div class="filters">
+          <label class="filter">
+            <span class="filter-label">Time range</span>
+            <select id="retrieval-range"></select>
+          </label>
+        </div>
+        <div class="retrievals-grid">
+          <div class="card">
+            <div id="status-donut" class="status-donut"></div>
+          </div>
+          <div class="card retrieval-list-card">
+            <h2 id="retrieval-list-title"></h2>
+            <ul id="retrieval-list" class="retrieval-list"></ul>
+            <p id="retrieval-list-empty" class="muted empty" hidden>No requests in this range.</p>
+            <button id="load-more-retrievals" class="secondary-button" type="button" hidden>Load more</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="trace-panel" class="overlay" hidden>
+    <div class="overlay-card trace-card" role="dialog" aria-modal="true" aria-labelledby="trace-title">
+      <div class="overlay-header">
+        <h2 id="trace-title">Request trace</h2>
+        <button id="close-trace" class="link-button" type="button" aria-label="Close trace">Close</button>
+      </div>
+      <div id="trace-body"></div>
+    </div>
+  </div>
+
+  <div id="sign-in" class="overlay" hidden>
+    <form id="sign-in-form" class="overlay-card sign-in-card">
+      <h2>Security dashboard</h2>
+      <p class="muted">Enter the report access token (<code>REPORT_ACCESS_TOKEN</code>).</p>
+      <input id="token-input" type="password" autocomplete="current-password" required>
+      <p id="sign-in-error" class="error" hidden>That token was rejected.</p>
+      <button class="primary-button" type="submit">Sign in</button>
+    </form>
+  </div>
+
+  <div id="tooltip" class="tooltip" role="status" hidden></div>
+</body>
+</html>
