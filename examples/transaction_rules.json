@@ -1,0 +1,40 @@
+{
+  "version": "transactions-v1",
+  "rules": [
+    {
+      "rule_id": "block_both_transaction_parties",
+      "enabled": true,
+      "rule": {
+        "name": "block_both_transaction_parties",
+        "head": {
+          "predicate": "violation",
+          "terms": [
+            "?u",
+            "?transaction",
+            "both_parties"
+          ]
+        },
+        "body": [
+          {
+            "predicate": "knows",
+            "terms": [
+              "?u",
+              "?transaction",
+              "transaction.sender",
+              "?sender"
+            ]
+          },
+          {
+            "predicate": "knows",
+            "terms": [
+              "?u",
+              "?transaction",
+              "transaction.recipient",
+              "?recipient"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
