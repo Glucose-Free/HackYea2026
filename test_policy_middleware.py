@@ -1,144 +1,301 @@
-import os
+import concurrent.futures
+import json
+from pathlib import Path
+import sqlite3
 import tempfile
+import threading
 import unittest
 
-from policy_middleware import KnowledgeStore, MCPRequest, PolicyConfigStore, PolicyMiddleware
+from policy_middleware import (
+    DatalogAtom, DatalogProgram, DatalogRule, InferenceLimit, KnowledgeFact, KnowledgeStore,
+    LegacyDatabaseError, MCPRequest, PolicyConfigStore, PolicyError, PolicyMiddleware,
+    PolicyRuleConfig, TrustedPrincipal,
+)
+
+from examples.aml import AMLToolAdapter, build_registry, demo_executor, initialize_demo
 
 
-class PolicyMiddlewareTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.db_path = os.path.join(self.tempdir.name, "knowledge.sqlite3")
-        self.rules_path = os.path.join(self.tempdir.name, "policy_rules.json")
-        self.store = KnowledgeStore(db_path=self.db_path)
-        self.config = PolicyConfigStore(path=self.rules_path)
-        self.middleware = PolicyMiddleware(store=self.store, config_store=self.config)
+def demo_principal(tenant, user, role="restricted_analyst"):
+    return TrustedPrincipal(tenant, user, role=role, dataset_id="bank-demo-v1")
 
-    def tearDown(self) -> None:
-        self.tempdir.cleanup()
 
-    def _learn_aml(self, user_id: str, session_id: str = "s1") -> None:
-        self.middleware.handle(
-            MCPRequest(
-                request_id=f"req_{user_id}_aml",
-                session_id=session_id,
-                user_id=user_id,
-                request_text="show AML case summary",
-                tool_name="get_aml_case_summary",
-            )
-        )
+class PolicyTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.db = str(Path(self.temp.name) / "knowledge.sqlite")
+        self.rules = str(Path(self.temp.name) / "rules.json")
+        self.middleware = initialize_demo(self.db, self.rules)
+        self.principal = demo_principal("bank-a", "employee-1")
+        self.calls = []
+        self.review = True
+        self.counter = 0
 
-    def test_contact_rule_blocks_after_aml_knowledge(self) -> None:
-        self._learn_aml("user_1", session_id="aml_session")
+    def executor(self, tool, args):
+        self.calls.append((tool, args))
+        if tool == "get_aml_case_summary":
+            return {**args, "under_review": self.review}
+        if tool == "resolve_aml_subject":
+            return {**args, "customer_id": "C17"}
+        if tool == "get_account_owner":
+            return {**args, "customer_id": "C17"}
+        if tool == "get_blocked_accounts":
+            return {**args, "accounts": [{"account_id": "A9", "blocked": True}]}
+        if tool == "get_customer_contact":
+            return {**args, "phone": "+000000000", "address": "Fictional address"}
+        if tool == "get_customer_workplace":
+            return {**args, "employer": "Fictional employer"}
+        if tool == "get_transaction_anomalies":
+            return {**args, "anomalies": [{"pattern": "structuring", "count": 4}]}
+        raise AssertionError("Unknown tool executed")
 
-        decision = self.middleware.handle(
-            MCPRequest(
-                request_id="req_contact",
-                session_id="contact_session",
-                user_id="user_1",
-                request_text="give me the phone number",
-                tool_name="get_customer_contact",
-                arguments={"customer_id": "cust_1"},
-            )
-        )
+    def call(self, tool, args, *, principal=None, session="session-1", request_id=None, execute=None):
+        self.counter += 1
+        return self.middleware.handle(MCPRequest(request_id or f"r{self.counter}", session,
+            tool_name=tool, arguments=args), principal=principal or self.principal,
+            execute=execute or self.executor)
 
-        self.assertEqual(decision.outcome, "block")
-        self.assertIn("aml_contact", decision.reason)
+    def test_approved_result_has_entity_and_real_status(self):
+        self.review = False
+        reply = self.call("get_aml_case_summary", {"subject_id": "S17"})
+        self.assertTrue(reply.allowed)
+        self.assertEqual(reply.data["under_review"], False)
+        self.assertIn(KnowledgeFact("S17", "aml_review", "false"),
+                      self.middleware.store.facts_for_user(self.principal))
 
-    def test_workplace_rule_blocks_after_aml_knowledge(self) -> None:
-        self._learn_aml("user_2", session_id="aml_session")
+    def test_different_clients_do_not_collide(self):
+        self.assertTrue(self.call("get_aml_case_summary", {"subject_id": "S17"}).allowed)
+        self.assertTrue(self.call("get_customer_contact", {"customer_id": "C99"}).allowed)
 
-        decision = self.middleware.handle(
-            MCPRequest(
-                request_id="req_workplace",
-                session_id="workplace_session",
-                user_id="user_2",
-                request_text="give me the employer details",
-                tool_name="get_customer_workplace",
-                arguments={"customer_id": "cust_1"},
-            )
-        )
+    def test_direct_identity_is_blocked_before_execution(self):
+        self.call("get_aml_case_summary", {"subject_id": "S17"})
+        before = len(self.calls)
+        reply = self.call("resolve_aml_subject", {"subject_id": "S17"})
+        self.assertFalse(reply.allowed)
+        self.assertIsNone(reply.data)
+        self.assertEqual(len(self.calls), before)
 
-        self.assertEqual(decision.outcome, "block")
-        self.assertIn("aml_workplace", decision.reason)
+    def test_reverse_order_is_blocked(self):
+        self.call("resolve_aml_subject", {"subject_id": "S17"})
+        self.assertFalse(self.call("get_aml_case_summary", {"subject_id": "S17"}).allowed)
+        self.assertEqual(len(self.calls), 1)
 
-    def test_disabling_contact_rule_keeps_workplace_rule_active(self) -> None:
-        self.config.set_rule_enabled("block_aml_contact", False)
-        self.middleware.reload_rules()
+    def test_denied_fact_not_persisted_and_harmless_query_works(self):
+        self.call("get_aml_case_summary", {"subject_id": "S17"})
+        self.call("resolve_aml_subject", {"subject_id": "S17"})
+        self.assertFalse(any(f.relation == "identity" for f in
+                             self.middleware.store.facts_for_user(self.principal)))
+        self.assertTrue(self.call("get_transaction_anomalies", {"subject_id": "S17"}).allowed)
 
-        self._learn_aml("user_3", session_id="aml_session")
+    def test_cross_session_history(self):
+        self.call("get_aml_case_summary", {"subject_id": "S17"}, session="one")
+        self.assertFalse(self.call("resolve_aml_subject", {"subject_id": "S17"}, session="two").allowed)
 
-        contact_decision = self.middleware.handle(
-            MCPRequest(
-                request_id="req_contact_disabled",
-                session_id="contact_session",
-                user_id="user_3",
-                request_text="give me the phone number",
-                tool_name="get_customer_contact",
-                arguments={"customer_id": "cust_1"},
-            )
-        )
-        workplace_decision = self.middleware.handle(
-            MCPRequest(
-                request_id="req_workplace_enabled",
-                session_id="workplace_session",
-                user_id="user_3",
-                request_text="give me the employer details",
-                tool_name="get_customer_workplace",
-                arguments={"customer_id": "cust_1"},
-            )
-        )
+    def test_persistent_history_survives_restart(self):
+        self.call("get_aml_case_summary", {"subject_id": "S17"})
+        self.middleware = PolicyMiddleware(KnowledgeStore(self.db), PolicyConfigStore(self.rules), build_registry())
+        self.assertFalse(self.call("resolve_aml_subject", {"subject_id": "S17"}).allowed)
 
-        self.assertEqual(contact_decision.outcome, "allow")
-        self.assertEqual(workplace_decision.outcome, "block")
-        self.assertIn("aml_workplace", workplace_decision.reason)
+    def test_distinct_user_is_isolated(self):
+        self.call("get_aml_case_summary", {"subject_id": "S17"})
+        other = demo_principal("bank-a", "employee-2")
+        self.assertTrue(self.call("resolve_aml_subject", {"subject_id": "S17"}, principal=other).allowed)
 
-    def test_single_information_is_allowed_without_conflict(self) -> None:
-        cases = [
-            {
-                "name": "contact only",
-                "user_id": "user_contact",
-                "session_id": "contact_session",
-                "request_id": "req_contact_only",
-                "tool_name": "get_customer_contact",
-                "request_text": "give me the phone number",
-                "arguments": {"customer_id": "cust_1"},
-            },
-            {
-                "name": "workplace only",
-                "user_id": "user_workplace",
-                "session_id": "workplace_session",
-                "request_id": "req_workplace_only",
-                "tool_name": "get_customer_workplace",
-                "request_text": "give me the employer details",
-                "arguments": {"customer_id": "cust_1"},
-            },
-            {
-                "name": "aml only",
-                "user_id": "user_aml",
-                "session_id": "aml_session",
-                "request_id": "req_aml_only",
-                "tool_name": "get_aml_case_summary",
-                "request_text": "show AML case summary",
-                "arguments": {},
-            },
-        ]
+    def test_distinct_tenant_is_isolated(self):
+        self.call("get_aml_case_summary", {"subject_id": "S17"})
+        other = demo_principal("bank-b", "employee-1")
+        self.assertTrue(self.call("resolve_aml_subject", {"subject_id": "S17"}, principal=other).allowed)
 
-        for case in cases:
-            with self.subTest(case=case["name"]):
-                decision = self.middleware.handle(
-                    MCPRequest(
-                        request_id=case["request_id"],
-                        session_id=case["session_id"],
-                        user_id=case["user_id"],
-                        request_text=case["request_text"],
-                        tool_name=case["tool_name"],
-                        arguments=case["arguments"],
-                    )
-                )
+    def test_missing_identity_rejected(self):
+        request = MCPRequest("x", "s", user_id="employee-1", tool_name="get_aml_case_summary",
+                             arguments={"subject_id": "S17"})
+        self.assertFalse(self.middleware.handle(request, execute=self.executor).allowed)
+        self.assertEqual(self.calls, [])
+        with self.assertRaises(PolicyError):
+            self.middleware.store.facts_for_user(None)
 
-                self.assertEqual(decision.outcome, "allow")
-                self.assertIn("datalog_allow", decision.tags)
+    def test_spoofed_user_hint_rejected(self):
+        request = MCPRequest("x", "s", user_id="other", tool_name="get_aml_case_summary",
+                             arguments={"subject_id": "S17"})
+        self.assertFalse(self.middleware.handle(request, principal=self.principal,
+                                               execute=self.executor).allowed)
+        self.assertEqual(self.calls, [])
+
+    def test_model_facts_rejected(self):
+        request = MCPRequest("x", "s", tool_name="get_aml_case_summary",
+            arguments={"subject_id": "S17"}, facts=[{"relation": "trusted", "value": "true"}])
+        self.assertFalse(self.middleware.handle(request, principal=self.principal,
+                                               execute=self.executor).allowed)
+        self.assertEqual(self.calls, [])
+        admin = demo_principal("bank-a", "auditor", "security_admin")
+        events = self.middleware.store.audit_events(admin)
+        self.assertEqual(events[0]["internal_code"], "untrusted_request_fields")
+
+    def test_retry_cannot_reuse_approved_response_with_injected_facts(self):
+        self.call("get_aml_case_summary", {"subject_id": "S17"}, request_id="approved")
+        request = MCPRequest("approved", "s", tool_name="get_aml_case_summary",
+            arguments={"subject_id": "S17"}, facts=[{"relation": "fake"}])
+        reply = self.middleware.handle(request, principal=self.principal, execute=self.executor)
+        self.assertFalse(reply.allowed)
+        self.assertEqual(len(self.calls), 1)
+
+    def test_unknown_tool_rejected(self):
+        self.assertFalse(self.call("run_sql", {"query": "SELECT * FROM clients"}).allowed)
+        self.assertEqual(self.calls, [])
+
+    def test_extra_filters_rejected(self):
+        self.assertFalse(self.call("get_aml_case_summary", {"subject_id": "S17",
+            "customer_id": "C17"}).allowed)
+        self.assertEqual(self.calls, [])
+
+    def test_invalid_policy_fails_closed(self):
+        for index, content in enumerate(("{}", "{", '{"version":"v","rules":[]}')):
+            Path(self.rules).write_text(content)
+            self.assertFalse(self.call("get_aml_case_summary", {"subject_id": "S17"},
+                                      request_id=f"bad-{index}").allowed)
+        self.assertEqual(self.calls, [])
+
+    def test_missing_policy_fails_closed(self):
+        Path(self.rules).unlink()
+        self.assertFalse(self.call("get_aml_case_summary", {"subject_id": "S17"}).allowed)
+        self.assertEqual(self.calls, [])
+
+    def test_indirect_account_path_is_blocked(self):
+        self.call("get_aml_case_summary", {"subject_id": "S17"})
+        self.assertTrue(self.call("get_blocked_accounts", {"subject_id": "S17"}).allowed)
+        self.assertFalse(self.call("get_account_owner", {"account_id": "A9"}).allowed)
+        self.assertEqual(len(self.calls), 2)
+
+    def test_known_owners_conservatively_block_unknown_returned_account(self):
+        self.call("get_account_owner", {"account_id": "A9"})
+        self.call("get_aml_case_summary", {"subject_id": "S17"})
+        self.assertFalse(self.call("get_blocked_accounts", {"subject_id": "S17"}).allowed)
+        self.assertEqual(len(self.calls), 2)
+
+    def test_true_and_false_review_have_same_refusal(self):
+        self.call("resolve_aml_subject", {"subject_id": "S17"})
+        replies = []
+        for status in (True, False):
+            self.review = status
+            replies.append(self.call("get_aml_case_summary", {"subject_id": "S17"}).as_dict())
+        self.assertEqual(replies[0], replies[1])
+        self.assertEqual(len(self.calls), 1)
+
+    def test_literal_status_policy_is_checked_for_all_possible_statuses(self):
+        k = lambda *t: DatalogAtom("knows", tuple(t))
+        rule = PolicyRuleConfig("only_true", DatalogRule("only_true",
+            DatalogAtom("violation", ("?u", "?s", "only_true")),
+            (k("?u", "?s", "aml_review", "true"), k("?u", "?s", "identity", "?c"))))
+        self.middleware.config_store.save([rule], "literal-policy")
+        self.call("resolve_aml_subject", {"subject_id": "S17"})
+        self.review = False
+        self.assertFalse(self.call("get_aml_case_summary", {"subject_id": "S17"}).allowed)
+        self.assertEqual(len(self.calls), 1)
+
+    def test_unexpected_response_fields_never_leak_or_persist(self):
+        def bad(tool, args):
+            return {**args, "under_review": True, "phone": "secret"}
+        reply = self.call("get_aml_case_summary", {"subject_id": "S17"}, execute=bad)
+        self.assertFalse(reply.allowed)
+        self.assertIsNone(reply.data)
+        self.assertEqual(self.middleware.store.facts_for_user(self.principal), [])
+        admin = demo_principal("bank-a", "auditor", "security_admin")
+        self.assertNotIn("secret", json.dumps(self.middleware.store.audit_events(admin)))
+
+    def test_wrong_entity_response_is_blocked(self):
+        reply = self.call("get_aml_case_summary", {"subject_id": "S17"},
+                          execute=lambda tool, args: {"subject_id": "S99", "under_review": True})
+        self.assertFalse(reply.allowed)
+        self.assertEqual(self.middleware.store.facts_for_user(self.principal), [])
+
+    def test_executor_exception_is_generic_and_not_persisted_as_knowledge(self):
+        def fail(tool, args):
+            raise RuntimeError("secret internal identifier")
+        reply = self.call("get_aml_case_summary", {"subject_id": "S17"}, execute=fail)
+        self.assertFalse(reply.allowed)
+        self.assertNotIn("secret", reply.reason)
+        self.assertEqual(self.middleware.store.facts_for_user(self.principal), [])
+
+    def test_same_request_retry_is_idempotent(self):
+        first = self.call("get_aml_case_summary", {"subject_id": "S17"}, request_id="retry")
+        again = self.call("get_aml_case_summary", {"subject_id": "S17"}, request_id="retry")
+        self.assertEqual(first, again)
+        self.assertEqual(len(self.calls), 1)
+
+    def test_request_id_reuse_with_different_payload_is_blocked(self):
+        self.call("get_aml_case_summary", {"subject_id": "S17"}, request_id="retry")
+        self.assertFalse(self.call("resolve_aml_subject", {"subject_id": "S17"}, request_id="retry").allowed)
+        self.assertEqual(len(self.calls), 1)
+
+    def test_admin_proof_and_tenant_scoping(self):
+        self.call("get_aml_case_summary", {"subject_id": "S17"}, request_id="first")
+        self.call("resolve_aml_subject", {"subject_id": "S17"}, request_id="second")
+        with self.assertRaises(PolicyError):
+            self.middleware.store.audit_events(self.principal)
+        admin = demo_principal("bank-a", "auditor", "security_admin")
+        events = self.middleware.store.audit_events(admin)
+        self.assertEqual(len(events), 2)
+        proof = json.loads(events[-1]["evidence_json"])
+        self.assertEqual(proof["request_ids"], ["first", "second"])
+        self.assertIn("block_aml_identity", proof["rule_ids"])
+        self.assertEqual(self.middleware.store.audit_events(
+            demo_principal("bank-b", "auditor", "security_admin")), [])
+
+    def test_parallel_complementary_calls_cannot_both_pass(self):
+        gate = threading.Barrier(2)
+        def run(tool):
+            isolated = PolicyMiddleware(KnowledgeStore(self.db), PolicyConfigStore(self.rules), build_registry())
+            gate.wait(timeout=5)
+            return isolated.handle(MCPRequest(tool, tool, tool_name=tool,
+                arguments={"subject_id": "S17"}), principal=self.principal, execute=self.executor)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(run, tool) for tool in
+                       ("get_aml_case_summary", "resolve_aml_subject")]
+            replies = [future.result(timeout=10) for future in futures]
+        self.assertEqual(sorted(r.outcome for r in replies), ["allow", "block"])
+        self.assertEqual(len(self.calls), 1)
+
+    def test_legacy_database_is_not_silently_reset(self):
+        path = str(Path(self.temp.name) / "legacy.sqlite")
+        with sqlite3.connect(path) as conn:
+            conn.execute("CREATE TABLE knowledge_facts (subject TEXT)")
+            conn.execute("INSERT INTO knowledge_facts VALUES ('existing-history')")
+        with self.assertRaises(LegacyDatabaseError):
+            KnowledgeStore(path)
+        with sqlite3.connect(path) as conn:
+            self.assertEqual(conn.execute("SELECT * FROM knowledge_facts").fetchone()[0], "existing-history")
+
+
+class DatalogTests(unittest.TestCase):
+    def test_subject_is_preserved(self):
+        atom = KnowledgeFact("S17", "aml_review", "true").to_atom("user")
+        self.assertEqual(atom.terms, ("user", "S17", "aml_review", "true"))
+
+    def test_unsafe_rule_is_rejected(self):
+        with self.assertRaises(PolicyError):
+            DatalogRule("bad", DatalogAtom("violation", ("?u", "?missing", "bad")),
+                        (DatalogAtom("knows", ("?u", "?s", "identity", "?c")),))
+
+    def test_wrong_arity_rejected(self):
+        with self.assertRaises(PolicyError):
+            DatalogAtom("knows", ("user", "aml_flag", "true"))
+
+    def test_fact_variables_rejected(self):
+        with self.assertRaises(PolicyError):
+            KnowledgeFact("?subject", "identity", "C17")
+
+    def test_inference_limit_fails_instead_of_silently_ignoring_facts(self):
+        program = DatalogProgram(max_facts=1)
+        with self.assertRaises(InferenceLimit):
+            program.infer([DatalogAtom("knows", ("u", "S1", "identity", "C1")),
+                           DatalogAtom("knows", ("u", "S2", "identity", "C2"))])
+
+    def test_recursive_cycle_reaches_fixed_point(self):
+        k = lambda relation: DatalogAtom("knows", ("?u", "?s", relation, "?v"))
+        rules = [DatalogRule("a_to_b", k("b"), (k("a"),)),
+                 DatalogRule("b_to_a", k("a"), (k("b"),))]
+        facts = DatalogProgram(rules).infer([DatalogAtom("knows", ("u", "S1", "a", "x"))])
+        self.assertEqual(len(facts), 2)
 
 
 if __name__ == "__main__":
