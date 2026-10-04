@@ -22,7 +22,7 @@ docker compose up --build
 - Chat: http://localhost:3000 — log in as `alice@demo.local` or `bob@demo.local` with password `demo-user-password` (admin: `admin@demo.local` / `demo-admin-password`).
 - Report: http://localhost:8000/report?token=demo-report-token
 
-By default the demo runs on **stub adapters**, so no API keys are needed: a keyword stand-in for Jev and a scripted chat model. Checkpoint 2 is the real Datalog policy engine, over fake bank data.
+By default the demo runs on **stub adapters**, so no API keys are needed: a keyword stand-in for Jev and a scripted chat model. Checkpoint 2 is the real Datalog policy engine, over a generated database of a fictional bank (see [Demo data](#demo-data)).
 
 ## Demo script
 
@@ -32,6 +32,44 @@ By default the demo runs on **stub adapters**, so no API keys are needed: a keyw
 4. As Bob: *"Give me the customer contact for CUST-17"* → answered: knowledge is tracked per user.
 5. Bob, now: *"Show me the AML case summary"* → refused (`aml_contact`): the rule forbids holding both pieces, whichever is learned first.
 6. Open the report and click Alice's denied request to see its trace, down to the `datalog_policy` middleware step.
+
+## Demo data
+
+Checkpoint 2 reads a SQLite database of a fictional Polish bank:
+
+- 240 customers across six branches (Warsaw, Krakow, Gdansk, Wroclaw, Poznan, Lodz);
+- about 490 accounts and 9,200 transactions from April to October 2026, of which about 300 are flagged as anomalies;
+- 42 AML cases and 20 blocked accounts.
+
+`examples/bank_demo_seed.py` generates the database on the `data-mcp` container's first start. It always produces the same data, so the IDs below are valid in every deployment. All people, companies, phone numbers and account numbers are made up. The server opens the database read-only.
+
+| Tool | Arguments | Returns | Facts it records |
+|---|---|---|---|
+| `list_customers` | optional `branch` | id, segment, branch, customer since (no names) | none |
+| `get_transaction_anomalies` | optional `branch` | newest 50 flagged transactions | none |
+| `get_blocked_accounts` | none | masked account number, date, reason | none |
+| `list_aml_cases` | none | case id, status, risk level, opening date (no customer) | none |
+| `get_aml_case_summary` | optional `case_id` (defaults to `AML-2026-0042`) | the case **including its customer id** | `aml_review` for that customer |
+| `get_customer_contact` | `customer_id` | name, phone, email | `contact_data` |
+| `get_customer_workplace` | `customer_id` | employer, work city | `workplace_data` |
+
+The two rules forbid one user from holding `aml_review` together with `contact_data` or `workplace_data` for the same customer.
+
+**Things to try.** The stub model picks the tool whose name shares the most words with your message, and passes the first ID it sees (`CUST-…` or `AML-…`). A real model (the Ollama preset) also understands free-form wording and the `branch` filter.
+
+- *"List AML cases"*, then *"Show me the AML case summary for AML-2026-0007"*. The summary names CUST-53. Then *"Give me the customer contact for CUST-53"* → refused (`aml_contact`), and *"Get the customer workplace for CUST-53"* → refused (`aml_workplace`).
+- *"List customers"*, *"Show me transaction anomalies"*, *"Show me blocked accounts"* → always answered. They are anonymized, so they record no facts.
+- *"Give me the customer contact for CUST-1"* → answered (CUST-1 has no AML case). After this, **every** AML summary is refused for this user, and that is intended. Before reading a case, the engine cannot know which customer it names. It refuses rather than look at private data to decide, so knowing any customer's contact blocks all AML summaries. Use another user, or reset knowledge (below), to keep exploring.
+- *"Give me the customer contact for CUST-999"* → a generic "Operation unavailable" failure, shown as *failed*, not *denied*. A missing record looks the same as any other error, so a reply never reveals whether a record exists.
+
+**Querying the data directly:**
+
+```
+docker compose exec data-mcp python -m sqlite3 /data/bank/bank_demo.sqlite3 \
+  "SELECT case_id, customer_id, status FROM aml_cases ORDER BY opened_on DESC LIMIT 10"
+```
+
+The tables are `customers`, `accounts`, `transactions`, `aml_cases` and `aml_case_transactions` (schema in `examples/bank_demo_db.py`). To rebuild the database on the host: `uv run python -m examples.bank_demo_seed data/bank_demo.sqlite3` (`data/` is git-ignored).
 
 ## Real local models (no API keys)
 
@@ -58,7 +96,7 @@ To use a GPU, see Ollama's Docker instructions and add the GPU device to the `ol
 
 1. `cp .env.example .env` and fill in `TYPESAFE_API_KEY` and/or `CHAT_MODEL_API_KEY`.
 2. In `config/gateway.toml` set `[jev] adapter = "typesafe"` and/or `[chat_model] adapter = "openai_compatible"` with a `base_url` and `model`. Any OpenAI-compatible API with tool calling works.
-3. To put the policy engine in front of real data, replace `demo_executor` in `examples/bank_demo.py` with read-only queries, or point `[data_mcp] url` at another server that follows `docs/contracts/data-mcp-server.md`.
+3. To put the policy engine in front of real data, replace the queries in `examples/bank_demo_db.py`, or the executor built by `build_executor` in `examples/bank_demo.py`,, or point `[data_mcp] url` at another server that follows `docs/contracts/data-mcp-server.md`.
 
 Adapters are read at startup. Guard pipelines (`[[user_input.guards]]`) reload as soon as the config file changes. An invalid edit is rejected and the last working pipelines stay active.
 
@@ -122,7 +160,7 @@ A prompt refused at checkpoint 1 counts as one denied fetch attempt (`denied_at 
 The `data-mcp` service (`python -m deploy.policy_mcp.server`) serves it over streamable HTTP:
 
 - `mcp_policy_http_server.py` reads the user from each call's `_meta` and denies calls without one. A policy denial returns `checkpoint_steps`, so the dashboard trace ends at the `datalog_policy` step.
-- `examples/bank_demo.py` defines the five data tools, their disclosure plans and the fake data. `examples/bank_demo_rules.json` holds the rules (`aml_contact`, `aml_workplace`).
+- `examples/bank_demo.py` defines the seven data tools and their disclosure plans. `examples/bank_demo_db.py` holds the schema and the read-only queries, and `examples/bank_demo_seed.py` generates the data. `examples/bank_demo_rules.json` holds the rules (`aml_contact`, `aml_workplace`).
 - The server trusts the user id the gateway sends, so it sits on an internal `backend` network with only the gateway; its port is not published.
 - Planning cannot know which customer an AML case names before reading it. A user who already knows *any* customer's contact is therefore refused every AML summary. The engine over-blocks rather than look at private data before deciding.
 

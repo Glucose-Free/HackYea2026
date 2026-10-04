@@ -2,7 +2,7 @@
 
 What the gateway expects from the data MCP server (checkpoint 2, the black box), and what it sends. Anything not listed here is up to the server.
 
-Status: implemented by `mcp_policy_http_server.py` with the tools in `examples/bank_demo.py` (the `data-mcp` service). The tool table below shows fact names from the original proposal; the implemented facts are `aml_review`, `contact_data` and `workplace_data`, keyed by customer id.
+Status: implemented by `mcp_policy_http_server.py` with the tools in `examples/bank_demo.py` (the `data-mcp` service). The tool table below is the original proposal. The implementation adds two anonymized listing tools (`list_customers`, `list_aml_cases`), and its facts are `aml_review`, `contact_data` and `workplace_data`, keyed by customer id. The README's *Demo data* section lists the implemented tools.
 
 ## How the gateway uses the server
 
@@ -14,7 +14,7 @@ Open WebUI ─▶ gateway ─▶ checkpoint 1 (Jev) ─▶ chat model ──tool
 
 - The chat model sees every tool the server lists and decides which to call. **Every listed tool is reachable by a possibly prompt-injected model.**
 - The gateway opens one MCP session per chat request, lists the tools, makes the calls, and closes the session.
-- `python -m deploy.policy_mcp.server` runs the policy engine as this server, with fake data.
+- `python -m deploy.policy_mcp.server` runs the policy engine as this server, over a generated SQLite database of a fictional bank.
 
 ## 1. Transport
 
@@ -102,7 +102,7 @@ CallToolResult(
 ## Checklist
 
 - [x] SDK-based server over streamable HTTP on port 8001
-- [x] Only the five data tools listed; rule management and `evaluate_request` removed from the model-facing server
+- [x] Only data tools listed; rule management and `evaluate_request` removed from the model-facing server
 - [x] User and session read from `_meta`; deny when the user is missing
 - [x] Denials use `isError: true` and `checkpoint_steps`
 - [ ] `mcp.py` renamed (done); SQLite file kept on a volume (done) but `policy_knowledge.sqlite3` is still tracked

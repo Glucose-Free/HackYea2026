@@ -16,7 +16,7 @@ NON_OBJECT_ARGUMENTS_ERROR = "tool call arguments must be a JSON object"
 STUB_MODEL_NAME = "stub-chat-model"
 STUB_DATA_REQUEST_KEYWORDS = ("show", "list", "get", "find", "how many", "give me", "fetch")
 STUB_TOOL_NAME_STOPWORDS = {"get", "list", "show", "fetch"}
-STUB_ENTITY_ID_PATTERN = re.compile(r"\b[A-Z]+-[0-9]+\b")
+STUB_ENTITY_ID_PATTERN = re.compile(r"\b[A-Z]+(?:-[0-9]+)+\b")
 STUB_GREETING = "I'm the demo data assistant. Ask me for data, for example: show me recent transactions."
 STUB_TOOL_RESULT_ANSWER = "Here is what the data service returned:\n{content}"
 STUB_TOOL_DENIED_ANSWER = "The data service refused this request: {reason}"
@@ -122,10 +122,20 @@ def get_latest_user_text(messages: list[dict[str, Any]]) -> str:
 
 def build_stub_arguments(message_text: str, tool: ToolDefinition) -> dict[str, Any]:
     # A scripted model cannot understand the request; the first ID-shaped token (e.g. CUST-17) is enough for the demo.
-    entity_id = STUB_ENTITY_ID_PATTERN.search(message_text)
-    if entity_id is None:
+    # It fills every required argument, and any optional one whose declared pattern accepts the ID.
+    entity_id_match = STUB_ENTITY_ID_PATTERN.search(message_text)
+    if entity_id_match is None:
         return {}
-    return {name: entity_id.group() for name in tool.input_schema.get("required", [])}
+    entity_id = entity_id_match.group()
+    required_names = set(tool.input_schema.get("required", []))
+    properties = tool.input_schema.get("properties", {})
+    return {name: entity_id for name in [*required_names, *properties]
+            if name in required_names or is_accepted_by_pattern(entity_id, properties[name])}
+
+
+def is_accepted_by_pattern(value: str, property_schema: dict[str, Any]) -> bool:
+    pattern = property_schema.get("pattern")
+    return pattern is not None and re.search(pattern, value) is not None
 
 
 def choose_tool_for_message(message_text: str, tools: list[ToolDefinition]) -> ToolDefinition:
