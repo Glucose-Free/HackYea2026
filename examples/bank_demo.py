@@ -1,4 +1,7 @@
-"""Example domain: the gateway demo's five data tools. Not imported by the generic core or MCP.
+"""Example domain: the gateway demo's five data tools.
+
+The records live in `bank_demo_seed.sql` and are seeded into a SQLite database; the executor only
+queries them read-only, so no demo record is hard-coded in Python.
 
 Facts are keyed by customer ID, so the AML case and the customer's contact or workplace meet on one
 subject. Planning cannot know which customer an AML case names before reading it, so the summary is
@@ -9,8 +12,11 @@ private data before deciding.
 from __future__ import annotations
 
 from functools import partial
+from pathlib import Path
 from typing import Any, Callable, Iterable
+import os
 import re
+import sqlite3
 
 from policy_middleware import (
     DatalogAtom, DatalogRule, KnowledgeFact, PlannedFact, PolicyError, PolicyRuleConfig,
@@ -19,6 +25,9 @@ from policy_middleware import (
 
 ANALYST_ROLE = "data_analyst"
 RULES_VERSION = "bank-demo-v1"
+
+DEFAULT_BANK_DEMO_DB_PATH = os.environ.get("POLICY_DEMO_DB_PATH", "bank_demo.sqlite3")
+BANK_DEMO_SEED_PATH = str(Path(__file__).with_name("bank_demo_seed.sql"))
 
 TRANSACTION_ANOMALIES_TOOL = "get_transaction_anomalies"
 BLOCKED_ACCOUNTS_TOOL = "get_blocked_accounts"
@@ -35,23 +44,6 @@ DISCLOSED_VALUE = "disclosed"
 CONTACT_RULE_ID = "aml_contact"
 WORKPLACE_RULE_ID = "aml_workplace"
 MAX_LISTED_ROWS = 100
-
-TRANSACTION_ANOMALIES = [
-    {"id": "TX-1001", "date": "2026-09-28", "amount_pln": 12500.00, "branch": "Warsaw", "pattern": "structuring"},
-    {"id": "TX-1003", "date": "2026-09-30", "amount_pln": 47000.00, "branch": "Warsaw", "pattern": "rapid in-out"},
-]
-BLOCKED_ACCOUNTS = [
-    {"account": "PL-****-4411", "blocked_on": "2026-09-30", "reason": "suspicious inflows"},
-    {"account": "PL-****-9032", "blocked_on": "2026-10-01", "reason": "court order"},
-]
-AML_CASE_SUMMARY = {
-    "case_id": "AML-2026-0042",
-    "status": "under investigation",
-    "customer_id": "CUST-17",
-    "linked_transactions": ["TX-1001", "TX-1003"],
-}
-CUSTOMER_CONTACTS = {"CUST-17": {"phone": "+48 601 234 567", "email": "j.kowalski@example.pl"}}
-CUSTOMER_WORKPLACES = {"CUST-17": {"employer": "Kowalski Logistics sp. z o.o.", "city": "Warsaw"}}
 
 ANOMALY_FIELDS = {"id", "date", "amount_pln", "branch", "pattern"}
 BLOCKED_ACCOUNT_FIELDS = {"account", "blocked_on", "reason"}
@@ -177,17 +169,90 @@ def build_registry() -> ToolRegistry:
     return ToolRegistry(tool_definitions())
 
 
-def demo_executor(tool: str, args: dict) -> Any:
-    """Fictional fixture data standing in for the bank's read-only SQL."""
-    if tool == TRANSACTION_ANOMALIES_TOOL:
-        return TRANSACTION_ANOMALIES
-    if tool == BLOCKED_ACCOUNTS_TOOL:
-        return BLOCKED_ACCOUNTS
-    if tool == AML_CASE_SUMMARY_TOOL:
-        return AML_CASE_SUMMARY
-    customer_id = args.get(CUSTOMER_ID_FIELD)
-    if tool == CUSTOMER_CONTACT_TOOL and customer_id in CUSTOMER_CONTACTS:
-        return {CUSTOMER_ID_FIELD: customer_id, **CUSTOMER_CONTACTS[customer_id]}
-    if tool == CUSTOMER_WORKPLACE_TOOL and customer_id in CUSTOMER_WORKPLACES:
-        return {CUSTOMER_ID_FIELD: customer_id, **CUSTOMER_WORKPLACES[customer_id]}
-    raise LookupError("No such record")
+class BankDemoStore:
+    """Read-only access to the fictional bank records seeded from `bank_demo_seed.sql`."""
+
+    def __init__(self, db_path: str):
+        self.db_path = str(db_path)
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.db_path, timeout=30)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only = ON")
+        return connection
+
+    def _query_all(self, sql: str, parameters: tuple = ()) -> list[dict]:
+        connection = self._connect()
+        try:
+            return [dict(row) for row in connection.execute(sql, parameters).fetchall()]
+        finally:
+            connection.close()
+
+    def _query_one(self, sql: str, parameters: tuple = ()) -> dict | None:
+        connection = self._connect()
+        try:
+            row = connection.execute(sql, parameters).fetchone()
+            return dict(row) if row is not None else None
+        finally:
+            connection.close()
+
+    def transaction_anomalies(self) -> list[dict]:
+        return self._query_all("SELECT * FROM transaction_anomalies ORDER BY id")
+
+    def blocked_accounts(self) -> list[dict]:
+        return self._query_all("SELECT * FROM blocked_accounts ORDER BY blocked_on, account")
+
+    def aml_case_summary(self) -> dict:
+        case = self._query_one("SELECT case_id, status, customer_id FROM aml_cases ORDER BY case_id LIMIT 1")
+        if case is None:
+            raise LookupError("No AML case")
+        case["linked_transactions"] = [row["transaction_id"] for row in self._query_all(
+            "SELECT transaction_id FROM aml_case_transactions WHERE case_id = ? ORDER BY position",
+            (case["case_id"],))]
+        return case
+
+    def customer_contact(self, customer_id: str) -> dict:
+        record = self._query_one("SELECT phone, email FROM customer_contacts WHERE customer_id = ?", (customer_id,))
+        if record is None:
+            raise LookupError("No such record")
+        return {CUSTOMER_ID_FIELD: customer_id, **record}
+
+    def customer_workplace(self, customer_id: str) -> dict:
+        record = self._query_one("SELECT employer, city FROM customer_workplaces WHERE customer_id = ?", (customer_id,))
+        if record is None:
+            raise LookupError("No such record")
+        return {CUSTOMER_ID_FIELD: customer_id, **record}
+
+
+def initialize_bank_demo_db(db_path: str = DEFAULT_BANK_DEMO_DB_PATH,
+                            seed_path: str = BANK_DEMO_SEED_PATH) -> BankDemoStore:
+    """Create and seed the demo database; idempotent, so it is safe on every startup."""
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(db_path, timeout=30)
+    try:
+        connection.executescript(Path(seed_path).read_text(encoding="utf-8"))
+        connection.commit()
+    finally:
+        connection.close()
+    return BankDemoStore(db_path)
+
+
+def build_executor(db_path: str) -> Callable[[str, dict], Any]:
+    """Trusted read-only executor over the seeded demo database; stands in for the bank's SQL."""
+    store = BankDemoStore(db_path)
+
+    def execute(tool: str, args: dict) -> Any:
+        if tool == TRANSACTION_ANOMALIES_TOOL:
+            return store.transaction_anomalies()
+        if tool == BLOCKED_ACCOUNTS_TOOL:
+            return store.blocked_accounts()
+        if tool == AML_CASE_SUMMARY_TOOL:
+            return store.aml_case_summary()
+        customer_id = args.get(CUSTOMER_ID_FIELD)
+        if tool == CUSTOMER_CONTACT_TOOL:
+            return store.customer_contact(customer_id)
+        if tool == CUSTOMER_WORKPLACE_TOOL:
+            return store.customer_workplace(customer_id)
+        raise LookupError("No such record")
+
+    return execute

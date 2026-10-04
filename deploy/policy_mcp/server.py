@@ -16,21 +16,32 @@ DB_PATH_ENV = "POLICY_DB_PATH"
 RULES_PATH_ENV = "POLICY_RULES_PATH"
 TENANT_ID_ENV = "POLICY_TENANT_ID"
 DATASET_ID_ENV = "POLICY_DATASET_ID"
+DEMO_DB_PATH_ENV = "POLICY_DEMO_DB_PATH"
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = "8001"
 DEFAULT_DB_PATH = "/data/policy/knowledge.sqlite3"
+DEMO_DB_FILENAME = "bank_demo.sqlite3"
 DEFAULT_TENANT_ID = "demo-bank"
 DEFAULT_DATASET_ID = "bank-demo-v1"
 STREAMABLE_HTTP_TRANSPORT = "streamable-http"
 BANK_DEMO_RULES_PATH = str(Path(bank_demo.__file__).with_name("bank_demo_rules.json"))
 
 
+def resolve_demo_db_path(db_path: str, demo_db_path: str | None = None) -> str:
+    if demo_db_path:
+        return demo_db_path
+    return str(Path(db_path).with_name(DEMO_DB_FILENAME))
+
+
 def build_policy_data_server(db_path: str, rules_path: str = BANK_DEMO_RULES_PATH,
                              tenant_id: str = DEFAULT_TENANT_ID,
-                             dataset_id: str = DEFAULT_DATASET_ID) -> PolicyHttpMCPServer:
+                             dataset_id: str = DEFAULT_DATASET_ID,
+                             demo_db_path: str | None = None) -> PolicyHttpMCPServer:
+    demo_db_path = resolve_demo_db_path(db_path, demo_db_path)
+    bank_demo.initialize_bank_demo_db(demo_db_path)
     middleware = PolicyMiddleware(KnowledgeStore(db_path), PolicyConfigStore(rules_path), bank_demo.build_registry())
     scope = ServedScope(tenant_id, role=bank_demo.ANALYST_ROLE, dataset_id=dataset_id)
-    return PolicyHttpMCPServer(middleware, bank_demo.demo_executor, scope)
+    return PolicyHttpMCPServer(middleware, bank_demo.build_executor(demo_db_path), scope)
 
 
 def main() -> None:
@@ -41,6 +52,7 @@ def main() -> None:
         rules_path=os.environ.get(RULES_PATH_ENV, BANK_DEMO_RULES_PATH),
         tenant_id=os.environ.get(TENANT_ID_ENV, DEFAULT_TENANT_ID),
         dataset_id=os.environ.get(DATASET_ID_ENV, DEFAULT_DATASET_ID),
+        demo_db_path=os.environ.get(DEMO_DB_PATH_ENV),
     )
     server.run(STREAMABLE_HTTP_TRANSPORT, host=os.environ.get(HOST_ENV, DEFAULT_HOST),
                port=int(os.environ.get(PORT_ENV, DEFAULT_PORT)))
