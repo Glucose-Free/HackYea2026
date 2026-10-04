@@ -216,7 +216,7 @@ class BankDemoDataset:
     aml_case_transactions: list[AmlCaseTransactionRow]
 
 
-# The storyline the README's demo script and the tests rely on. Kept verbatim from the original fixture data.
+# The storyline the README's demo script and the tests rely on.
 STORYLINE_CUSTOMER_ID = "CUST-17"
 STORYLINE_BRANCH = "Warsaw"
 STORYLINE_CUSTOMER = CustomerRow(STORYLINE_CUSTOMER_ID, "Jan Kowalski", SEGMENT_PREMIUM, STORYLINE_BRANCH,

@@ -1,51 +1,34 @@
 # TODO
 
-What is left, by priority. Update it as items land. Design: `docs/superpowers/specs/2026-10-04-ai-control-layer-design.md`.
+Open work, by priority. Architecture: `docs/architecture.md`.
 
-## Now: needed for the demo
+## Before showing it to anyone
 
-- [x] Merge `origin/main` (the policy engine, `50e32de`) into `feat/ai-control-layer`. Expect a conflict in `README.md`: keep ours and add a short paragraph on the policy engine.
-- [ ] Rebuild and smoke-test the stack: `docker compose up --build`. Then log in at http://localhost:3000 and run the README demo script. The image has never been built from the current code.
-- [ ] Push the branch and open a PR.
-- [ ] Before showing it to anyone, replace the demo secrets in `.env` (the gateway now logs a warning while they are in use) (`GATEWAY_API_KEY`, `REPORT_ACCESS_TOKEN`, `WEBUI_SECRET_KEY`, passwords).
-- [x] Bring the data MCP server in line with `docs/contracts/data-mcp-server.md` (`policy_engine/mcp_http_server.py`, `deploy/policy_mcp/`).
-- [x] Untrack `policy_knowledge.sqlite3` and add `*.sqlite3` to `.gitignore`.
-- [x] Replace the `data-mcp` stub service in `docker-compose.yml` with the real server, and delete `deploy/stub_mcp/`.
-- [ ] Switch to real services once keys exist: `[jev] adapter = "typesafe"` and `[chat_model] adapter = "openai_compatible"` in `config/gateway.toml`, keys in `.env`. Then tune the Jev check wording and `refuse_threshold` on real prompts, including benign ones that mention rules or policies.
+- [ ] Replace the demo secrets in `.env`: `GATEWAY_API_KEY`, `REPORT_ACCESS_TOKEN`, `WEBUI_SECRET_KEY` and the passwords. The gateway logs a warning while the defaults are in use.
+- [ ] With API keys, switch to `[jev] adapter = "typesafe"` and `[chat_model] adapter = "openai_compatible"`, then tune the check wording and `refuse_threshold` on real prompts, including benign ones that mention rules or policies.
 
-## Next: the dashboard
+## Dashboard
 
-The read API exists (`/admin/fetches/totals`, `/admin/users/fetch-stats`, `/admin/requests`, `/admin/requests/{id}/trace`).
+- [ ] Guard config editing on top of `ConfigStore` and the guard registry: `GET /admin/guard-types` with JSON schemas for forms, guard CRUD, history and rollback.
+- [ ] Admin authentication. Today one shared `REPORT_ACCESS_TOKEN` reads the audit and edits the rules, and it is also accepted as `?token=`, which leaks into access logs and browser history.
 
-- [x] Dashboard UI: passed/denied fetches over time, per-user stats, and the request trace view (`/dashboard/`).
-- [x] Dashboard: a "partially passed" request status (answered with at least one fetch denied at checkpoint 2), shown in the "Data retrievals" donut view.
-- [ ] Config-editing admin API on top of `ConfigStore` and `GuardRegistry`:
-  - `GET /admin/guard-types` (with JSON schemas for forms)
-  - guard config CRUD
-  - history and rollback
-- [ ] Datalog rule editing for checkpoint 2 through the same admin API (list, enable/disable, upsert), backed by the policy engine's `PolicyConfigStore`. This replaces the rule tools that are coming off the MCP server.
-- [ ] Authentication for the admin side: today it is a single shared `REPORT_ACCESS_TOKEN`, also accepted as `?token=`, which leaks into access logs and browser history.
+## Design gaps
 
-## Later: known design gaps
-
-Accepted for the demo; listed in the README.
-
-- [ ] **Indirect prompt injection:** tool results reach the model unguarded. Add a tool-result hook to the agent loop with its own guard pipeline (same `Guard` contract).
+- [ ] **Indirect prompt injection:** tool results reach the model unguarded. Add a tool-result guard pipeline to the agent loop, using the same `Guard` contract.
 - [ ] **Forged history:** the client sends the whole conversation. Store conversations on the server, keyed by Open WebUI chat id.
-- [ ] **No output check:** the gateway relies on checkpoint 2 for what data may leave the DB.
-- [ ] **Identity from headers:** trust rests on the shared API key and network isolation. Replace `OpenWebUiHeaderResolver` with an SSO/OIDC resolver, or use Open WebUI's signed `X-OpenWebUI-User-Jwt`.
-- [ ] **Scale:** the audit log is one JSONL file with an in-process lock (single uvicorn worker only), and `JsonlAuditQuery` reads the whole file per query. Move both to a database behind the existing `AuditLog` / `AuditQuery` interfaces.
+- [ ] **No output check:** what may leave the database is decided only by checkpoint 2.
+- [ ] **Identity from headers:** replace `OpenWebUiHeaderResolver` with an OIDC resolver, or verify Open WebUI's signed `X-OpenWebUI-User-Jwt`.
+- [ ] **Scale:** the audit log is one JSONL file behind an in-process lock (single worker), and `JsonlAuditQuery` reads the whole file per query. Move both to a database behind the `AuditLog` and `AuditQuery` interfaces.
 
-## Small fixes deferred from code review
+## Small fixes
 
-- [ ] An admin query with `end` near year 1 returns 500 (`OverflowError` in `build_time_range`); it should return 400.
-- [ ] A non-ASCII API key or report token returns 500 (`compare_digest` on `str`); compare UTF-8 bytes instead.
-- [x] Every MCP `isError` (unknown tool, bad arguments) counts as a checkpoint-2 denial. Treat a result as a denial only when `checkpoint_steps` contains a `denied` step; otherwise let the model retry.
+- [ ] An admin query with `end` near year 1 returns 500 (`OverflowError` in `build_time_range`) instead of 400.
+- [ ] A non-ASCII API key or report token returns 500 (`compare_digest` on `str`). Compare UTF-8 bytes.
 - [ ] Audit readers don't take the write lock, so a large event being written can briefly show the chain as broken.
 - [ ] An event id can repeat after a corrupt log line (`_count` skips unreadable lines).
-- [ ] Coding-guideline nits:
-  - `_run_model_turn` returns a tuple instead of a struct
-  - some string literals are not constants (`"system"`, `"assistant"`, `"function"`, OpenAI object names, event keys)
-  - `USER_ROLE` is defined twice
-  - `new_trace_id`/`new_span_id`/`ensure_utc`/`count_fetches` don't follow the `get_`/`build_`/`parse_` naming
-  - `tests/` is copied into the runtime image
+- [ ] `tests/` is copied into the runtime image.
+- [ ] Naming and constants:
+  - `_run_model_turn` returns a tuple instead of a struct;
+  - some string literals are not constants (`"system"`, `"assistant"`, `"function"`, OpenAI object names, event keys);
+  - `USER_ROLE` is defined twice;
+  - `new_trace_id`, `new_span_id`, `ensure_utc` and `count_fetches` don't follow the `get_`/`build_`/`parse_` naming.

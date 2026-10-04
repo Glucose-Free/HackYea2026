@@ -3,7 +3,7 @@
 Unlike mcp_stdio_server.py (one authenticated principal per stdio process), one process serves
 every user: the gateway names the user in each call's `_meta`, and the knowledge store is keyed
 per user. This trusts whoever can reach the port, so the port must be reachable only by the
-gateway (network isolation). See docs/contracts/data-mcp-server.md.
+gateway (network isolation). See docs/data-mcp-server.md.
 """
 from __future__ import annotations
 

@@ -13,7 +13,7 @@ Structure: SCQA opening (Situation → Complication → Question → Answer), th
 | 7 | We decide before reading the data, so a refusal can't leak it | The over-blocking trade-off, presented as a deliberate choice: deciding on the secret value would make the refusal itself a side channel. |
 | 8 | Policy is config: rules and guards change without a redeploy | `gateway.toml` guards with enforce/monitor modes and `on_error`, Datalog rules in JSON, hot reload with last-known-good fallback. Judges will edit the config, so invite them to. |
 | 9 | Security teams get a tamper-evident trace of every decision | Dashboard screenshots: per-user denial share, request status donut, trace tree. Hash-chained audit log with a separate anchor, and `/audit/verify`. (Reporting, 20%) |
-| 10 | 252 tests prove both allowed and blocked paths | Test counts by area, positive and negative examples, runtime 2.4 s, one command to run. (Tests, 15%) |
+| 10 | 306 tests prove both allowed and blocked paths | Test counts by area, positive and negative examples, runtime 3.3 s, one command to run. (Tests, 15%) |
 | 11 | Pluggable by design | Guards via entry points, `ToolRegistry` per domain (AML and transactions share one engine), adapters for any OpenAI-compatible model or local model. (Implementability, 15%) |
 | 12 | Coverage vs. the brief: what's done, what's next | Honest table: requirement → done / partial / roadmap. |
 | 13 | Close | Back to slide 1: "Now that leak is blocked, and the trace shows exactly why." |

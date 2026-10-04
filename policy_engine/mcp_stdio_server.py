@@ -97,7 +97,7 @@ class MCPPolicyServer:
             return _error(request_id, -32600, "Invalid request")
         notification = "id" not in message
         if notification:
-            # A tools/call without an ID MUST NOT execute a data query.
+            # A tools/call without an ID is a notification and gets no reply, so it must not read any data.
             if message["method"] == "notifications/initialized" and self._state == "initializing":
                 try:
                     _fields(message, {"jsonrpc", "method"}, {"params"})
@@ -114,7 +114,7 @@ class MCPPolicyServer:
             return _error(request_id, -32000, "Session limit reached; reconnect")
         self._seen_ids.add(key)
         try:
-            # Also bound/validate direct Python calls, not just wire frames. Detach arguments.
+            # Direct Python callers get the same limits as wire messages, and their arguments are copied.
             encoded = json.dumps(message, ensure_ascii=True, allow_nan=False, separators=(",", ":"))
             if len(encoded.encode("utf-8")) > MAX_MESSAGE_BYTES:
                 raise RPCError(-32600, "Message too large")

@@ -1,5 +1,7 @@
 # AI Control Layer (HackYea 2026)
 
+**Demo video:** https://youtu.be/N1fwzpqPgA8
+
 A gateway between employees and an internal LLM data assistant. Every chat message passes two checkpoints before any company data is returned, and every decision is written to a tamper-evident audit log.
 
 ```
@@ -7,7 +9,7 @@ Open WebUI ──▶ Gateway ──▶ Checkpoint 1: semantic guards (Jev) ─�
                                          refuse ─▶ user                               └─ Checkpoint 2: Datalog policy ─▶ DB
 ```
 
-- **Checkpoint 1 (this repo):** a config-driven pipeline of guards that run on the user's latest message. The built-in guard asks [TypeSafe Jev](https://docs.typesafe.ai/introduction) yes/no questions such as "is this a prompt injection?" and refuses above a threshold.
+- **Checkpoint 1:** a config-driven pipeline of guards that run on the user's latest message. The built-in guard asks [TypeSafe Jev](https://docs.typesafe.ai/introduction) yes/no questions such as "is this a prompt injection?" and refuses above a threshold.
 - **Checkpoint 2:** a Datalog policy engine inside the data MCP server (`policy_engine/`). It remembers what each user already knows and refuses a read that would complete a forbidden combination of facts. The gateway only sees its result.
 - **Audit:** each request is stored as one trace (prompt → checkpoint → guards → model turns → data fetches → middleware steps → reply) in a hash-chained JSONL log. After every write the event count and latest hash go to an anchor file on a separate volume, so `/audit/verify` also catches a log that was cut short, emptied or rehashed. Anyone who can write both volumes can still forge both; for stronger evidence, copy the `head` from `/audit/verify` somewhere the gateway host cannot write.
 
@@ -62,8 +64,6 @@ Four rules forbid one user from holding, for the same customer, `aml_review` tog
 
 The anonymized tools leave out every join key that would let a user work around a rule. Transaction tools name no account or customer. The customer profile shows no account numbers, masked or not, and no block status, because the blocked-accounts listing maps those to reasons such as "AML investigation hold".
 
-A running stack keeps its existing rules file. To pick up `history_contact` and `history_workplace`, click *Restore defaults* in the dashboard's rules editor, or remove the `policy-rules` volume (`docker compose down` then `docker volume rm` it).
-
 **Things to try.** The stub model picks the tool whose name shares the most words with your message, and passes the first ID it sees (`CUST-…` or `AML-…`). A real model (the Ollama preset) also understands free-form wording and the filters, for example *"How many AML cases are high risk?"* or *"The five largest outgoing transfers in Krakow in September"*.
 
 - *"List AML cases"*, then *"Show me the AML case summary for AML-2026-0007"*. The summary names CUST-53. Then *"Give me the customer contact for CUST-53"* → refused (`aml_contact`), and *"Get the customer workplace for CUST-53"* → refused (`aml_workplace`).
@@ -106,7 +106,7 @@ To use a GPU, see Ollama's Docker instructions and add the GPU device to the `ol
 
 1. `cp .env.example .env` and fill in `TYPESAFE_API_KEY` and/or `CHAT_MODEL_API_KEY`.
 2. In `config/gateway.toml` set `[jev] adapter = "typesafe"` and/or `[chat_model] adapter = "openai_compatible"` with a `base_url` and `model`. Any OpenAI-compatible API with tool calling works.
-3. To put the policy engine in front of real data, replace the queries in `examples/bank_demo_db.py`, or the executor built by `build_executor` in `examples/bank_demo.py`, or point `[data_mcp] url` at another server that follows `docs/contracts/data-mcp-server.md`.
+3. To put the policy engine in front of real data, replace the queries in `examples/bank_demo_db.py`, or the executor built by `build_executor` in `examples/bank_demo.py`, or point `[data_mcp] url` at another server that follows [docs/data-mcp-server.md](docs/data-mcp-server.md).
 
 Adapters are read at startup. Guard pipelines (`[[user_input.guards]]`) reload as soon as the config file changes. An invalid edit is rejected and the last working pipelines stay active.
 
@@ -190,7 +190,7 @@ To reset what demo users know: `docker compose down` and `docker volume rm ai-co
 | `examples/` | Domains for the engine. `bank_demo*` is the demo's bank (tools, queries, data generator, rules); `aml.py` and `transactions.py` are smaller domains that show one engine serving several |
 | `deploy/` | Container entry points: the `data-mcp` server, Open WebUI user seeding, demo audit-log seeding |
 | `config/` | Gateway config (guards, models), one file per preset |
-| `docs/` | Design spec, data-MCP contract, engine notes, pitch, TODO |
+| `docs/` | Architecture, data MCP interface, engine internals (Polish), pitch, TODO |
 | `tests/` | One suite for everything; `tests/policy_engine/` covers the engine on its own |
 
 ## Tests
@@ -208,4 +208,4 @@ uv run pytest                                         # locally, with uv
 - **Header identity:** trust rests on the shared API key and network isolation, not SSO.
 - **One dashboard token:** the report token that reads the audit also edits checkpoint 2's rules. A real deployment would split viewing from policy administration.
 
-Design: `docs/superpowers/specs/2026-10-04-ai-control-layer-design.md`.
+Architecture: [docs/architecture.md](docs/architecture.md).

@@ -28,7 +28,7 @@ html, body { margin: 0; background: #0d1014; color: var(--ink-primary); -webkit-
 
 .sidebar { background: var(--sidebar-background); padding: 40px 22px 26px; display: flex; flex-direction: column; gap: 14px; }
 .brand { display: flex; align-items: flex-start; gap: 8px; color: var(--accent); margin-bottom: 30px; }
-.brand svg { width: 34px; height: 34px; }
+.brand img { width: 34px; height: 34px; }
 .brand span { font-weight: 700; font-size: 17px; }
 .nav { color: var(--ink-secondary); font-size: 14px; padding-left: 11px; border-left: 3px solid var(--accent); line-height: 1.1; }
 .nav.active { color: var(--accent); }
@@ -103,11 +103,7 @@ ul.clean li::before { content: ""; position: absolute; left: 0; top: 11px; width
 <template id="sidebar">
   <nav class="sidebar">
     <div class="brand">
-      <svg viewBox="0 0 40 40" aria-hidden="true">
-        <rect x="2" y="2" width="36" height="36" fill="none" stroke="currentColor" stroke-width="2.5"/>
-        <path d="M9 9l8 8M31 9l-8 8M9 31l8-8M31 31l-8-8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-        <path d="M9 9h5M9 9v5M31 9h-5M31 9v5M9 31h5M9 31v-5M31 31h-5M31 31v-5" stroke="currentColor" stroke-width="2.5"/>
-      </svg>
+      <img src="img/logo.png" alt="">
       <span>aware</span>
     </div>
     <span class="nav" data-section="problem">Problem</span>
@@ -312,20 +308,20 @@ refuse_threshold = 0.5</pre>
 <section class="slide" data-section="proof">
   <div class="content">
     <div class="kicker">Self-testing suite</div>
-    <h1>256 tests cover both allowed and blocked paths</h1>
+    <h1>306 tests cover both allowed and blocked paths</h1>
     <div class="grid-2" style="grid-template-columns: 1.1fr 1fr;">
       <div class="card">
         <table class="compact">
           <tr><th>Area</th><th style="text-align:right">Tests</th><th style="width: 40%"></th></tr>
-          <tr><td>Policy engine, MCP server, extensibility</td><td class="num">104</td><td><div class="bar" style="width: 100%"></div></td></tr>
-          <tr><td>Gateway, API, config, identity</td><td class="num">55</td><td><div class="bar" style="width: 53%"></div></td></tr>
-          <tr><td>Audit log, queries, dashboard API</td><td class="num">49</td><td><div class="bar" style="width: 47%"></div></td></tr>
-          <tr><td>Agent loop, model client, MCP tools</td><td class="num">28</td><td><div class="bar" style="width: 27%"></div></td></tr>
-          <tr><td>Guard pipeline, semantic guard</td><td class="num">20</td><td><div class="bar" style="width: 19%"></div></td></tr>
+          <tr><td>Policy engine, MCP server, extensibility</td><td class="num">153</td><td><div class="bar" style="width: 100%"></div></td></tr>
+          <tr><td>Gateway, API, config, identity</td><td class="num">55</td><td><div class="bar" style="width: 36%"></div></td></tr>
+          <tr><td>Audit log, queries, dashboard API</td><td class="num">50</td><td><div class="bar" style="width: 33%"></div></td></tr>
+          <tr><td>Agent loop, model client, MCP tools</td><td class="num">28</td><td><div class="bar" style="width: 18%"></div></td></tr>
+          <tr><td>Guard pipeline, semantic guard</td><td class="num">20</td><td><div class="bar" style="width: 13%"></div></td></tr>
         </table>
       </div>
       <div style="display: flex; flex-direction: column; gap: 20px;">
-        <div class="card"><div class="stat-label">Run time, full suite</div><div class="stat-value">2.5 s</div><div class="stat-detail">no network, no API keys</div></div>
+        <div class="card"><div class="stat-label">Run time, full suite</div><div class="stat-value">3.3 s</div><div class="stat-detail">no network, no API keys</div></div>
         <div class="card">
           <h2>Examples</h2>
           <p style="font-size:17px; margin:0 0 10px"><span class="badge good">allowed</span>&nbsp; the same fetch for another user: knowledge is per user</p>
@@ -368,7 +364,7 @@ refuse_threshold = 0.5</pre>
         <tr><td>Semantic (AI) controls</td><td><span class="badge good">done</span></td><td>Granite Guardian checks, local, thresholds per check</td></tr>
         <tr><td>Deterministic controls</td><td><span class="badge good">done</span></td><td>Tool permissions + Datalog disclosure rules</td></tr>
         <tr><td>Reporting &amp; audit</td><td><span class="badge good">done</span></td><td>Dashboard, request traces, tamper-evident exportable JSONL log</td></tr>
-        <tr><td>Self-testing suite</td><td><span class="badge good">done</span></td><td>256 tests, allowed and blocked cases</td></tr>
+        <tr><td>Self-testing suite</td><td><span class="badge good">done</span></td><td>306 tests, allowed and blocked cases</td></tr>
         <tr><td>Centralized policy</td><td><span class="badge warn">partial</span></td><td>Guards, thresholds, rules hot-reload; allowed-models list next</td></tr>
         <tr><td>Budgets &amp; resources</td><td><span class="badge warn">partial</span></td><td>Tool-round cap and timeouts today; token / cost budgets per user next</td></tr>
         <tr><td>PII / secret patterns, redaction</td><td><span class="badge neutral" style="color: var(--ink-muted)">next</span></td><td>Deterministic regex guard with block-or-redact modes</td></tr>
@@ -386,7 +382,7 @@ refuse_threshold = 0.5</pre>
     <p style="font-size: 22px; max-width: 880px;">aware tracks what each user knows, stops the facts that must never meet, and shows security teams exactly which rule fired and why.</p>
     <div class="grid-3" style="margin-top: 30px; max-width: 900px;">
       <div class="card"><div class="stat-label"><span class="key" style="background: var(--accent)"></span>Checkpoints</div><div class="stat-value">2</div><div class="stat-detail">semantic + deterministic</div></div>
-      <div class="card"><div class="stat-label"><span class="key" style="background: var(--status-good)"></span>Tests</div><div class="stat-value">256</div><div class="stat-detail">passing in 2.5 s</div></div>
+      <div class="card"><div class="stat-label"><span class="key" style="background: var(--status-good)"></span>Tests</div><div class="stat-value">306</div><div class="stat-detail">passing in 3.3 s</div></div>
       <div class="card"><div class="stat-label"><span class="key" style="background: var(--status-warning)"></span>Paid APIs</div><div class="stat-value">0</div><div class="stat-detail">runs fully local</div></div>
     </div>
   </div>

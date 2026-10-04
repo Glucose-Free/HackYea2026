@@ -348,8 +348,8 @@ class MCPDecision:
     reason: str = ""
     data: Any | None = None
     tags: tuple[str, ...] = ()
-    # Audit-only: the trusted host may record it, but as_dict() leaves it out so the model never learns
-    # which rule fired. Empty for refusals that are not policy violations (bad arguments, failures).
+    # Left out of as_dict(): the host decides whether to tell the caller which rule fired.
+    # Empty for refusals that are not policy violations (bad arguments, failures).
     violated_rule_ids: tuple[str, ...] = ()
 
     @property
