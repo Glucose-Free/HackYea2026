@@ -1,5 +1,7 @@
 # AI Control Layer (HackYea 2026)
 
+**Demo video:** https://youtu.be/N1fwzpqPgA8
+
 A gateway between employees and an internal LLM data assistant. Every chat message passes two checkpoints before any company data is returned, and every decision is written to a tamper-evident audit log.
 
 ```
