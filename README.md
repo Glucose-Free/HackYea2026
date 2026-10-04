@@ -96,7 +96,7 @@ To use a GPU, see Ollama's Docker instructions and add the GPU device to the `ol
 
 1. `cp .env.example .env` and fill in `TYPESAFE_API_KEY` and/or `CHAT_MODEL_API_KEY`.
 2. In `config/gateway.toml` set `[jev] adapter = "typesafe"` and/or `[chat_model] adapter = "openai_compatible"` with a `base_url` and `model`. Any OpenAI-compatible API with tool calling works.
-3. To put the policy engine in front of real data, replace the queries in `examples/bank_demo_db.py`, or the executor built by `build_executor` in `examples/bank_demo.py`,, or point `[data_mcp] url` at another server that follows `docs/contracts/data-mcp-server.md`.
+3. To put the policy engine in front of real data, replace the queries in `examples/bank_demo_db.py`, or the executor built by `build_executor` in `examples/bank_demo.py`, or point `[data_mcp] url` at another server that follows `docs/contracts/data-mcp-server.md`.
 
 Adapters are read at startup. Guard pipelines (`[[user_input.guards]]`) reload as soon as the config file changes. An invalid edit is rejected and the last working pipelines stay active.
 
