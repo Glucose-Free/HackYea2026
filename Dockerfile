@@ -16,6 +16,7 @@ COPY gateway ./gateway
 COPY config ./config
 COPY deploy ./deploy
 COPY tests ./tests
+COPY conftest.py ./
 RUN uv sync --locked
 
 EXPOSE 8000

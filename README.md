@@ -79,7 +79,7 @@ A prompt refused at checkpoint 1 counts as one denied fetch attempt (`denied_at 
 
 `policy_middleware.py` is the checkpoint-2 engine. It stores each data request as facts in SQLite and runs a small Datalog engine over them. Knowledge accumulates per `user_id` across sessions: `knows(user, relation, value)` holds what a user has already seen, and `decision(block, reason)` is derived when AML knowledge combines with contact or workplace facts. Rules live in [`policy_rules.json`](policy_rules.json) and can be toggled or added without code changes.
 
-`python policy_mcp_server.py` serves it as a stdio MCP server. It is not wired into the Docker stack yet: the demo still uses the stub in `deploy/stub_mcp/`. The interface the gateway expects is in `docs/contracts/data-mcp-server.md`.
+`python mcp.py` serves it as a stdio MCP server. It is not wired into the Docker stack yet: the demo still uses the stub in `deploy/stub_mcp/`. The interface the gateway expects is in `docs/contracts/data-mcp-server.md`.
 
 ## Tests
 
