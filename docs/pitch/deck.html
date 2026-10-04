@@ -28,7 +28,7 @@ html, body { margin: 0; background: #0d1014; color: var(--ink-primary); -webkit-
 
 .sidebar { background: var(--sidebar-background); padding: 40px 22px 26px; display: flex; flex-direction: column; gap: 14px; }
 .brand { display: flex; align-items: flex-start; gap: 8px; color: var(--accent); margin-bottom: 30px; }
-.brand svg { width: 34px; height: 34px; }
+.brand img { width: 34px; height: 34px; }
 .brand span { font-weight: 700; font-size: 17px; }
 .nav { color: var(--ink-secondary); font-size: 14px; padding-left: 11px; border-left: 3px solid var(--accent); line-height: 1.1; }
 .nav.active { color: var(--accent); }
@@ -103,11 +103,7 @@ ul.clean li::before { content: ""; position: absolute; left: 0; top: 11px; width
 <template id="sidebar">
   <nav class="sidebar">
     <div class="brand">
-      <svg viewBox="0 0 40 40" aria-hidden="true">
-        <rect x="2" y="2" width="36" height="36" fill="none" stroke="currentColor" stroke-width="2.5"/>
-        <path d="M9 9l8 8M31 9l-8 8M9 31l8-8M31 31l-8-8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-        <path d="M9 9h5M9 9v5M31 9h-5M31 9v5M9 31h5M9 31v-5M31 31h-5M31 31v-5" stroke="currentColor" stroke-width="2.5"/>
-      </svg>
+      <img src="img/logo.png" alt="">
       <span>aware</span>
     </div>
     <span class="nav" data-section="problem">Problem</span>
