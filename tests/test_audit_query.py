@@ -11,6 +11,8 @@ from gateway.audit.query import (
     JsonlAuditQuery,
     PageRequest,
     RequestFilters,
+    RequestStatus,
+    RequestStatusCounts,
     TimeBucket,
     TimeRange,
     build_time_range,
@@ -21,9 +23,11 @@ from gateway.core.reply import DeniedAt, ReplyOutcome
 NOW = datetime(2026, 10, 4, 12, 30, tzinfo=UTC)
 
 
-def build_event(request_id: str, user_id: str, outcome: str, denied_at: str | None, fetch_outcomes: list[StepOutcome], at: datetime) -> dict:
+def build_event(
+    request_id: str, user_id: str, outcome: str, denied_at: str | None, fetch_outcomes: list[StepOutcome], at: datetime, prompt: str = "",
+) -> dict:
     recorder = TraceRecorder()
-    root = recorder.add_step(TraceStepKind.USER_PROMPT, user_id, StepOutcome.INFO, started_at=at)
+    root = recorder.add_step(TraceStepKind.USER_PROMPT, user_id, StepOutcome.INFO, detail={"message": prompt}, started_at=at)
     turn = recorder.add_step(TraceStepKind.AGENT_TURN, "model call 1", StepOutcome.INFO, parent_step_id=root, started_at=at)
     for index, fetch_outcome in enumerate(fetch_outcomes):
         fetch = recorder.add_step(TraceStepKind.DATA_FETCH, f"tool_{index}", fetch_outcome, parent_step_id=turn, started_at=at)
@@ -62,6 +66,13 @@ def test_fetch_totals_bucket_by_hour_with_zero_filled_gaps(audit_query: JsonlAud
     assert by_hour[9].passed == by_hour[9].denied == 0
 
 
+
+def test_fetch_totals_for_one_user_exclude_other_users(audit_query: JsonlAuditQuery):
+    buckets = audit_query.get_fetch_totals(TimeRange(NOW - timedelta(hours=3), NOW), TimeBucket.HOUR, user_id="bob")
+    assert sum(bucket.passed for bucket in buckets) == 0
+    assert sum(bucket.denied_at_checkpoint_1 for bucket in buckets) == 1
+    assert sum(bucket.denied_at_checkpoint_2 for bucket in buckets) == 0
+
 def test_user_stats_list_only_users_with_fetch_attempts(audit_query: JsonlAuditQuery):
     stats = audit_query.list_user_fetch_stats(TimeRange(NOW - timedelta(days=1), NOW))
     by_user = {entry.user_id: entry for entry in stats}
@@ -82,6 +93,48 @@ def test_list_requests_newest_first_with_filters_and_cursor(audit_query: JsonlAu
     assert [item.request_id for item in denied.items] == ["r2"]
     refused = audit_query.list_requests(RequestFilters(outcome=ReplyOutcome.REFUSED, user_id="bob"), PageRequest())
     assert [item.request_id for item in refused.items] == ["r3"]
+
+
+def test_request_status_says_how_much_of_the_request_got_through(tmp_path: Path):
+    events = [
+        build_event("passed", "alice", "answered", None, [StepOutcome.PASSED], NOW),
+        build_event("partial", "alice", "answered", "checkpoint_2", [StepOutcome.PASSED, StepOutcome.DENIED], NOW),
+        build_event("all-fetches-denied", "alice", "answered", "checkpoint_2", [StepOutcome.DENIED], NOW),
+        build_event("refused", "bob", "refused", "checkpoint_1", [], NOW),
+        build_event("failed", "bob", "failed_closed", None, [], NOW),
+    ]
+    log_path = tmp_path / "audit.jsonl"
+    log_path.write_text("".join(json.dumps({**event, "ts": NOW.isoformat()}) + "\n" for event in events))
+    items = JsonlAuditQuery(AuditLog(log_path)).list_requests(RequestFilters(), PageRequest()).items
+    assert {item.request_id: item.status for item in items} == {
+        "passed": RequestStatus.PASSED,
+        "partial": RequestStatus.PARTIALLY_PASSED,
+        "all-fetches-denied": RequestStatus.PARTIALLY_PASSED,
+        "refused": RequestStatus.BLOCKED,
+        "failed": RequestStatus.BLOCKED,
+    }
+
+
+def test_requests_filtered_by_status(audit_query: JsonlAuditQuery):
+    partial = audit_query.list_requests(RequestFilters(status=RequestStatus.PARTIALLY_PASSED), PageRequest())
+    assert [item.request_id for item in partial.items] == ["r2"]
+    passed = audit_query.list_requests(RequestFilters(status=RequestStatus.PASSED), PageRequest())
+    assert [item.request_id for item in passed.items] == ["r4", "r1"]
+
+
+def test_status_counts_cover_only_the_time_range(audit_query: JsonlAuditQuery):
+    last_hour = TimeRange(NOW - timedelta(hours=1), NOW)
+    assert audit_query.get_request_status_counts(last_hour) == RequestStatusCounts(passed=1, partially_passed=1, blocked=1)
+
+
+def test_summary_carries_the_user_prompt_and_tolerates_a_missing_one(tmp_path: Path):
+    with_prompt = build_event("with", "alice", "answered", None, [], NOW, prompt="list my transactions")
+    without_prompt = build_event("without", "alice", "answered", None, [], NOW)
+    without_prompt["steps"] = [step for step in without_prompt["steps"] if step["kind"] != TraceStepKind.USER_PROMPT]
+    log_path = tmp_path / "audit.jsonl"
+    log_path.write_text("".join(json.dumps({**event, "ts": NOW.isoformat()}) + "\n" for event in [with_prompt, without_prompt]))
+    items = JsonlAuditQuery(AuditLog(log_path)).list_requests(RequestFilters(), PageRequest()).items
+    assert {item.request_id: item.prompt for item in items} == {"with": "list my transactions", "without": ""}
 
 
 def test_invalid_cursor_rejected(audit_query: JsonlAuditQuery):

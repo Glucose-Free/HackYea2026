@@ -10,6 +10,8 @@ from gateway.audit.query import (
     PageRequest,
     RequestFilters,
     RequestPage,
+    RequestStatus,
+    RequestStatusCounts,
     RequestTrace,
     TimeBucket,
     UserFetchStats,
@@ -29,10 +31,11 @@ def get_fetch_totals(
     start: datetime | None = None,
     end: datetime | None = None,
     bucket: TimeBucket = TimeBucket.HOUR,
+    user_id: str | None = None,
     components: GatewayComponents = Depends(get_components),
 ) -> list[FetchTotalsBucket]:
     try:
-        return components.audit_query.get_fetch_totals(build_time_range(start, end), bucket)
+        return components.audit_query.get_fetch_totals(build_time_range(start, end), bucket, user_id=user_id)
     except InvalidTimeRangeError as error:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
 
@@ -54,6 +57,7 @@ def list_requests(
     user_id: str | None = None,
     outcome: ReplyOutcome | None = None,
     denied_at: DeniedAt | None = None,
+    request_status: RequestStatus | None = Query(None, alias="status"),
     start: datetime | None = None,
     end: datetime | None = None,
     cursor: str | None = None,
@@ -62,9 +66,21 @@ def list_requests(
 ) -> RequestPage:
     try:
         time_range = build_time_range(start, end) if start is not None or end is not None else None
-        filters = RequestFilters(user_id=user_id, outcome=outcome, denied_at=denied_at, time_range=time_range)
+        filters = RequestFilters(user_id=user_id, outcome=outcome, denied_at=denied_at, status=request_status, time_range=time_range)
         return components.audit_query.list_requests(filters, PageRequest(cursor=cursor, limit=limit))
     except (InvalidTimeRangeError, InvalidCursorError) as error:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
+
+
+@router.get("/requests/status-counts")
+def get_request_status_counts(
+    start: datetime | None = None,
+    end: datetime | None = None,
+    components: GatewayComponents = Depends(get_components),
+) -> RequestStatusCounts:
+    try:
+        return components.audit_query.get_request_status_counts(build_time_range(start, end))
+    except InvalidTimeRangeError as error:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
 
 

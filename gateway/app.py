@@ -1,7 +1,9 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from gateway.api import admin, audit, openai_compat
 from gateway.bootstrap import open_components_from_environment
@@ -9,6 +11,10 @@ from gateway.components import GatewayComponents
 
 APP_TITLE = "AI Control Gateway"
 HEALTH_OK_BODY = {"status": "ok"}
+DASHBOARD_PATH = "/dashboard"
+DASHBOARD_ROUTE_NAME = "dashboard"
+# The page itself is public; every data call it makes goes through the token-protected /admin API.
+DASHBOARD_DIRECTORY = Path(__file__).parent / "dashboard"
 
 
 def create_app(components: GatewayComponents | None = None) -> FastAPI:
@@ -27,6 +33,7 @@ def create_app(components: GatewayComponents | None = None) -> FastAPI:
     app.include_router(admin.router)
     app.include_router(audit.public_router)
     app.include_router(audit.protected_router)
+    app.mount(DASHBOARD_PATH, StaticFiles(directory=DASHBOARD_DIRECTORY, html=True), name=DASHBOARD_ROUTE_NAME)
 
     @app.get("/health")
     def get_health() -> dict[str, str]:
