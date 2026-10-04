@@ -28,7 +28,7 @@ from examples.bank_demo import (
     CUSTOMER_WORKPLACE_TOOL,
     WORKPLACE_RULE_ID,
 )
-from mcp_policy_http_server import PERMISSION_MIDDLEWARE, PERMISSION_PASSED_REASON, POLICY_DENIED_TEXT, POLICY_MIDDLEWARE
+from policy_engine.mcp_http_server import PERMISSION_MIDDLEWARE, PERMISSION_PASSED_REASON, POLICY_DENIED_TEXT, POLICY_MIDDLEWARE
 from gateway.core.gateway import FAILED_CLOSED_REASON, REPLY_STEP_OUTCOMES, REQUEST_ID_PREFIX, USER_INPUT_CHECKPOINT_NAME
 from gateway.guards.contract import GuardDecision
 from gateway.guards.pipeline import GuardMode

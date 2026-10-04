@@ -4,11 +4,11 @@ A gateway between employees and an internal LLM data assistant. Every chat messa
 
 ```
 Open WebUI ──▶ Gateway ──▶ Checkpoint 1: semantic guards (Jev) ──▶ chat model ⇄ MCP tools ──▶ data MCP server
-                                         refuse ─▶ user                               └─ Checkpoint 2 (black box): SQL middleware ─▶ DB
+                                         refuse ─▶ user                               └─ Checkpoint 2: Datalog policy ─▶ DB
 ```
 
 - **Checkpoint 1 (this repo):** a config-driven pipeline of guards that run on the user's latest message. The built-in guard asks [TypeSafe Jev](https://docs.typesafe.ai/introduction) yes/no questions such as "is this a prompt injection?" and refuses above a threshold.
-- **Checkpoint 2 (black box):** lives inside the data MCP server. It applies query-based rules that stop inference attacks. The gateway only sees its result.
+- **Checkpoint 2:** a Datalog policy engine inside the data MCP server (`policy_engine/`). It remembers what each user already knows and refuses a read that would complete a forbidden combination of facts. The gateway only sees its result.
 - **Audit:** each request is stored as one trace (prompt → checkpoint → guards → model turns → data fetches → middleware steps → reply) in a hash-chained JSONL log. After every write the event count and latest hash go to an anchor file on a separate volume, so `/audit/verify` also catches a log that was cut short, emptied or rehashed. Anyone who can write both volumes can still forge both; for stronger evidence, copy the `head` from `/audit/verify` somewhere the gateway host cannot write.
 
 ## Quickstart
@@ -45,20 +45,30 @@ Checkpoint 2 reads a SQLite database of a fictional Polish bank:
 
 | Tool | Arguments | Returns | Facts it records |
 |---|---|---|---|
-| `list_customers` | optional `branch` | id, segment, branch, customer since (no names) | none |
-| `get_transaction_anomalies` | optional `branch` | newest 50 flagged transactions | none |
+| `list_customers` | optional `branch`, `segment` | id, segment, branch, customer since (no names) | none |
+| `list_transactions` | optional `branch`, `channel`, `direction`, `min_amount_pln`, `date_from`, `date_to`, `order_by` (`newest` or `largest`) | up to 50 transactions, no account or customer | none |
+| `get_transaction_anomalies` | optional `branch`, `pattern`, `date_from`, `date_to` | newest 50 flagged transactions | none |
 | `get_blocked_accounts` | none | masked account number, date, reason | none |
-| `list_aml_cases` | none | case id, status, risk level, opening date (no customer) | none |
+| `list_aml_cases` | optional `status`, `risk_level` | case id, status, risk level, opening date (no customer) | none |
 | `get_aml_case_summary` | optional `case_id` (defaults to `AML-2026-0042`) | the case **including its customer id** | `aml_review` for that customer |
 | `get_customer_contact` | `customer_id` | name, phone, email | `contact_data` |
 | `get_customer_workplace` | `customer_id` | employer, work city | `workplace_data` |
+| `get_customer_profile` | `customer_id` | segment, branch, customer since, account types and opening dates, transaction count | none |
+| `list_customer_transactions` | `customer_id` | the customer's newest 50 transactions | `transaction_history` |
+| `get_transaction_details` | `transaction_id` | one transaction, no account or customer | none |
+| `get_statistics` | optional `branch` | counts by segment, branch, month (with volume), channel, anomaly pattern, AML status and risk, block reason | none |
 
-The two rules forbid one user from holding `aml_review` together with `contact_data` or `workplace_data` for the same customer.
+Four rules forbid one user from holding, for the same customer, `aml_review` together with `contact_data` (`aml_contact`) or `workplace_data` (`aml_workplace`), or `transaction_history` together with `contact_data` (`history_contact`) or `workplace_data` (`history_workplace`). The history rules exist because a customer's anomaly patterns hint at an AML review without the summary that would record one.
 
-**Things to try.** The stub model picks the tool whose name shares the most words with your message, and passes the first ID it sees (`CUST-…` or `AML-…`). A real model (the Ollama preset) also understands free-form wording and the `branch` filter.
+The anonymized tools leave out every join key that would let a user work around a rule. Transaction tools name no account or customer. The customer profile shows no account numbers, masked or not, and no block status, because the blocked-accounts listing maps those to reasons such as "AML investigation hold".
+
+A running stack keeps its existing rules file. To pick up `history_contact` and `history_workplace`, click *Restore defaults* in the dashboard's rules editor, or remove the `policy-rules` volume (`docker compose down` then `docker volume rm` it).
+
+**Things to try.** The stub model picks the tool whose name shares the most words with your message, and passes the first ID it sees (`CUST-…` or `AML-…`). A real model (the Ollama preset) also understands free-form wording and the filters, for example *"How many AML cases are high risk?"* or *"The five largest outgoing transfers in Krakow in September"*.
 
 - *"List AML cases"*, then *"Show me the AML case summary for AML-2026-0007"*. The summary names CUST-53. Then *"Give me the customer contact for CUST-53"* → refused (`aml_contact`), and *"Get the customer workplace for CUST-53"* → refused (`aml_workplace`).
-- *"List customers"*, *"Show me transaction anomalies"*, *"Show me blocked accounts"* → always answered. They are anonymized, so they record no facts.
+- *"List customers"*, *"Show me transaction anomalies"*, *"Show me blocked accounts"*, *"Show me recent transactions"*, *"Show me transaction details for TX-1001"*, *"Show me the customer profile for CUST-17"*, *"Show me bank statistics"* → always answered. They are anonymized, so they record no facts.
+- *"Show me customer transactions for CUST-53"*, then *"Give me the customer contact for CUST-53"* → refused (`history_contact`); the workplace is refused too (`history_workplace`).
 - *"Give me the customer contact for CUST-1"* → answered (CUST-1 has no AML case). After this, **every** AML summary is refused for this user, and that is intended. Before reading a case, the engine cannot know which customer it names. It refuses rather than look at private data to decide, so knowing any customer's contact blocks all AML summaries. Use another user, or reset knowledge (below), to keep exploring.
 - *"Give me the customer contact for CUST-999"* → a generic "Operation unavailable" failure, shown as *failed*, not *denied*. A missing record looks the same as any other error, so a reply never reveals whether a record exists.
 
@@ -159,17 +169,29 @@ A prompt refused at checkpoint 1 counts as one denied fetch attempt (`denied_at 
 
 ## Policy engine (checkpoint 2)
 
-`policy_middleware.py` is the checkpoint-2 engine. For each tool call it plans which facts the result could disclose, runs a bounded Datalog program over what the user already knows plus the plan, and runs the read only when no `violation` can be derived. Approved facts are stored per user in SQLite, so knowledge carries across chats. [README2.md](README2.md) (Polish) describes the engine in depth.
+`policy_engine/middleware.py` is the checkpoint-2 engine. It knows no domain: tools, facts and rules come from a domain module such as `examples/bank_demo.py`. For each tool call it plans which facts the result could disclose, runs a bounded Datalog program over what the user already knows plus the plan, and runs the read only when no `violation` can be derived. Approved facts are stored per user in SQLite, so knowledge carries across chats. [docs/policy-engine.md](docs/policy-engine.md) (Polish) describes the engine in depth.
 
 The `data-mcp` service (`python -m deploy.policy_mcp.server`) serves it over streamable HTTP:
 
-- `mcp_policy_http_server.py` reads the user from each call's `_meta` and denies calls without one. A policy denial returns `checkpoint_steps`, so the dashboard trace ends at the `datalog_policy` step.
-- `examples/bank_demo.py` defines the seven data tools and their disclosure plans. `examples/bank_demo_db.py` holds the schema and the read-only queries, and `examples/bank_demo_seed.py` generates the data. `examples/bank_demo_rules.json` holds the default rules (`aml_contact`, `aml_workplace`).
+- `policy_engine/mcp_http_server.py` reads the user from each call's `_meta` and denies calls without one. A policy denial returns `checkpoint_steps`, so the dashboard trace ends at the `datalog_policy` step.
+- `examples/bank_demo.py` defines the twelve data tools and their disclosure plans. `examples/bank_demo_db.py` holds the schema and the read-only queries, and `examples/bank_demo_seed.py` generates the data. `examples/bank_demo_rules.json` holds the default rules (`aml_contact`, `aml_workplace`, `history_contact`, `history_workplace`).
 - The live rules are `/data/rules/policy_rules.json` on the `policy-rules` volume, shared by `data-mcp` (which reads it on every tool call and seeds it from the defaults on first start) and the gateway (which edits it for the dashboard).
 - The server trusts the user id the gateway sends, so it sits on an internal `backend` network with only the gateway; its port is not published.
 - Planning cannot know which customer an AML case names before reading it. A user who already knows *any* customer's contact is therefore refused every AML summary. The engine over-blocks rather than look at private data before deciding.
 
 To reset what demo users know: `docker compose down` and `docker volume rm ai-control-layer_policy-data`.
+
+## Repository layout
+
+| Path | What it is |
+|---|---|
+| `gateway/` | The gateway: OpenAI-compatible API, checkpoint 1 guard pipeline, chat agent and MCP client, audit log, dashboard and its admin API |
+| `policy_engine/` | Checkpoint 2, domain-agnostic: the Datalog engine and knowledge store (`middleware.py`), the streamable-HTTP MCP server the gateway calls (`mcp_http_server.py`), and a stdio MCP server for single-user hosts (`mcp_stdio_server.py`) |
+| `examples/` | Domains for the engine. `bank_demo*` is the demo's bank (tools, queries, data generator, rules); `aml.py` and `transactions.py` are smaller domains that show one engine serving several |
+| `deploy/` | Container entry points: the `data-mcp` server, Open WebUI user seeding, demo audit-log seeding |
+| `config/` | Gateway config (guards, models), one file per preset |
+| `docs/` | Design spec, data-MCP contract, engine notes, pitch, TODO |
+| `tests/` | One suite for everything; `tests/policy_engine/` covers the engine on its own |
 
 ## Tests
 

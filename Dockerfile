@@ -13,12 +13,11 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-install-project
 
 COPY gateway ./gateway
-COPY policy_middleware.py mcp_policy_server.py mcp_policy_http_server.py ./
+COPY policy_engine ./policy_engine
 COPY examples ./examples
 COPY config ./config
 COPY deploy ./deploy
 COPY tests ./tests
-COPY conftest.py ./
 RUN uv sync --locked
 
 EXPOSE 8000

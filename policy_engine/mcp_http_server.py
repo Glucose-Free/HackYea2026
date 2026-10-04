@@ -1,6 +1,6 @@
 """Streamable-HTTP MCP server over PolicyMiddleware, for a gateway that attests the caller on every call.
 
-Unlike mcp_policy_server.py (one authenticated principal per stdio process), one process serves
+Unlike mcp_stdio_server.py (one authenticated principal per stdio process), one process serves
 every user: the gateway names the user in each call's `_meta`, and the knowledge store is keyed
 per user. This trusts whoever can reach the port, so the port must be reachable only by the
 gateway (network isolation). See docs/contracts/data-mcp-server.md.
@@ -17,7 +17,7 @@ import anyio
 from mcp.server.mcpserver import Context, MCPServer
 from mcp_types import CallToolResult, TextContent, Tool, ToolAnnotations
 
-from policy_middleware import MCPDecision, MCPRequest, PolicyMiddleware, TrustedPrincipal
+from policy_engine.middleware import MCPDecision, MCPRequest, PolicyMiddleware, TrustedPrincipal
 
 SERVER_NAME = "policy-data"
 USER_ID_META_KEY = "ai-control-gateway/user_id"

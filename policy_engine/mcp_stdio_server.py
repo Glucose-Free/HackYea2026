@@ -17,7 +17,7 @@ import time
 from typing import Any, BinaryIO, Callable, TextIO
 from uuid import uuid4
 
-from policy_middleware import (
+from policy_engine.middleware import (
     KnowledgeStore, MCPRequest, PolicyConfigStore, PolicyError,
     PolicyMiddleware, PUBLIC_BLOCK_REASON, ToolRegistry, TrustedPrincipal,
 )

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from policy_middleware import PolicyConfigStore, PolicyError, parse_policy_payload
+from policy_engine.middleware import PolicyConfigStore, PolicyError, parse_policy_payload
 
 REVISION_LENGTH = 12
 # Same rules, same version: switching a rule off and on again returns to the version the audit already knows.

@@ -8,10 +8,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from mcp_policy_server import (
+from policy_engine.mcp_stdio_server import (
     MAX_MESSAGE_BYTES, MCPPolicyServer, PROTOCOL_VERSION, RPCError,
 )
-from policy_middleware import (
+from policy_engine.middleware import (
     KnowledgeStore, PolicyConfigStore, PolicyMiddleware,
     PUBLIC_BLOCK_REASON, TrustedPrincipal,
 )
@@ -304,7 +304,7 @@ class MCPTests(unittest.TestCase):
 
     def test_session_request_limit_closes_without_data_query(self):
         self.ready()
-        with patch("mcp_policy_server.MAX_REQUESTS_PER_SESSION", 1):
+        with patch("policy_engine.mcp_stdio_server.MAX_REQUESTS_PER_SESSION", 1):
             self.assertEqual(self.call("get_transaction_anomalies", {"subject_id": "S17"})["error"]["code"], -32000)
         self.assertTrue(self.server._closing)
         self.assertEqual(self.calls, [])
@@ -354,7 +354,7 @@ class MCPTests(unittest.TestCase):
 
     def test_real_subprocess_mcp_handshake_and_mosaic_persists_across_processes(self):
         root = REPO_ROOT
-        command = [sys.executable, str(root / "mcp_policy_server.py"), "--backend", "examples.aml:create_demo_backend", "--db", self.db, "--rules", self.rules]
+        command = [sys.executable, "-m", "policy_engine.mcp_stdio_server", "--backend", "examples.aml:create_demo_backend", "--db", self.db, "--rules", self.rules]
         messages = [initialize_message(), initialized_message(),
                     {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
                     call_message(3, "get_aml_case_summary", {"subject_id": "S17"}),
@@ -376,7 +376,7 @@ class MCPTests(unittest.TestCase):
     def test_production_backend_factory_is_recipient_bound_and_stdout_is_suppressed(self):
         root = REPO_ROOT
         backend = Path(self.temp.name) / "test_backend.py"
-        backend.write_text('''from policy_middleware import TrustedPrincipal
+        backend.write_text('''from policy_engine.middleware import TrustedPrincipal
 from examples.aml import demo_executor, build_registry
 def create_backend():
     print("SECRET factory output")
@@ -384,7 +384,7 @@ def create_backend():
 ''', encoding="utf-8")
         import os
         env = {**os.environ, "PYTHONPATH": self.temp.name}
-        command = [sys.executable, str(root / "mcp_policy_server.py"), "--backend", "test_backend:create_backend",
+        command = [sys.executable, "-m", "policy_engine.mcp_stdio_server", "--backend", "test_backend:create_backend",
                    "--db", self.db, "--rules", self.rules]
         messages = [initialize_message(), initialized_message(), call_message(2, "get_aml_case_summary", {"subject_id": "S17"})]
         completed = subprocess.run(command, input="".join(json.dumps(m) + "\n" for m in messages),
@@ -399,14 +399,14 @@ def create_backend():
     def test_production_mode_does_not_bootstrap_missing_policy(self):
         root = REPO_ROOT
         backend = Path(self.temp.name) / "test_backend.py"
-        backend.write_text('''from policy_middleware import TrustedPrincipal
+        backend.write_text('''from policy_engine.middleware import TrustedPrincipal
 from examples.aml import demo_executor, build_registry
 def create_backend():
     return TrustedPrincipal("verified-tenant", "verified-user", role="restricted_analyst", dataset_id="bank-demo-v1"), build_registry(), demo_executor
 ''', encoding="utf-8")
         import os
         missing = str(Path(self.temp.name) / "missing.json")
-        completed = subprocess.run([sys.executable, str(root / "mcp_policy_server.py"), "--backend", "test_backend:create_backend",
+        completed = subprocess.run([sys.executable, "-m", "policy_engine.mcp_stdio_server", "--backend", "test_backend:create_backend",
             "--db", self.db, "--rules", missing], input="", text=True, capture_output=True, cwd=root,
             env={**os.environ, "PYTHONPATH": self.temp.name}, timeout=10)
         self.assertEqual(completed.returncode, 1)

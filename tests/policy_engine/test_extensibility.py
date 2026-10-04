@@ -8,8 +8,8 @@ import unittest
 from unittest.mock import patch
 
 from examples import aml, transactions
-from mcp_policy_server import MCPPolicyServer
-from policy_middleware import (
+from policy_engine.mcp_stdio_server import MCPPolicyServer
+from policy_engine.middleware import (
     DatalogAtom, DatalogProgram, DatalogRule, KnowledgeFact, KnowledgeStore, MCPRequest,
     PlannedFact, PolicyConfigStore, PolicyError, PolicyMiddleware, PolicyRuleConfig,
     ToolRegistry, TrustedPrincipal, ValueDomain,
@@ -222,7 +222,7 @@ class ExtensibilityTests(unittest.TestCase):
         base = transactions.tool_definitions()[0]
         domain = ValueDomain(values=frozenset({"v1", "v2", "v3", "v4", "v5"}))
         tool = replace(base, plan_disclosure=lambda args, history: [PlannedFact(domain, domain, domain)])
-        with patch("policy_middleware.DatalogProgram", lambda rules: DatalogProgram(rules, max_matches=10)):
+        with patch("policy_engine.middleware.DatalogProgram", lambda rules: DatalogProgram(rules, max_matches=10)):
             self.assertFalse(self.call(base.name, middleware=self.with_tools([tool])).allowed)
         self.assertEqual(self.calls, [])
 
@@ -235,12 +235,12 @@ class ExtensibilityTests(unittest.TestCase):
     def test_generic_core_and_mcp_import_without_any_example_modules(self):
         root = REPO_ROOT
         isolated = Path(self.temp.name) / "isolated"
-        isolated.mkdir()
-        for filename in ("policy_middleware.py", "mcp_policy_server.py"):
-            (isolated / filename).write_bytes((root / filename).read_bytes())
+        (isolated / "policy_engine").mkdir(parents=True)
+        for filename in ("__init__.py", "middleware.py", "mcp_stdio_server.py"):
+            (isolated / "policy_engine" / filename).write_bytes((root / "policy_engine" / filename).read_bytes())
         program = '''import sys
-import policy_middleware
-import mcp_policy_server
+import policy_engine.middleware
+import policy_engine.mcp_stdio_server
 assert not any(name == "examples" or name.startswith("examples.") for name in sys.modules)
 '''
         result = subprocess.run([sys.executable, "-c", program], cwd=isolated, capture_output=True, text=True, timeout=10)
@@ -257,7 +257,7 @@ assert not any(name == "examples" or name.startswith("examples.") for name in sy
             {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
                 "name": "get_transaction_recipient", "arguments": {"transaction_id": "wire-transfer-17"}}},
         ]
-        result = subprocess.run([sys.executable, str(root / "mcp_policy_server.py"),
+        result = subprocess.run([sys.executable, "-m", "policy_engine.mcp_stdio_server",
             "--backend", "examples.transactions:create_demo_backend", "--db", self.db, "--rules", self.rules],
             input="".join(json.dumps(m) + "\n" for m in messages), cwd=root, text=True, capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
