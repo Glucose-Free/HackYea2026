@@ -1,6 +1,9 @@
+from dataclasses import asdict
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 
 from gateway.api.dependencies import get_components, require_report_access_token
 from gateway.audit.query import (
@@ -19,9 +22,11 @@ from gateway.audit.query import (
 )
 from gateway.components import GatewayComponents
 from gateway.core.reply import DeniedAt, ReplyOutcome
+from gateway.policy.rules_admin import InvalidPolicyError, PolicyRulesAdmin, StalePolicyRevisionError
 
 TRACE_NOT_FOUND_DETAIL = "no request with id {request_id!r}"
 MAX_PAGE_LIMIT = 500
+POLICY_RULES_UNAVAILABLE_DETAIL = "policy rules are not configured on this gateway (set POLICY_RULES_PATH)"
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_report_access_token)])
 
@@ -90,3 +95,43 @@ def get_request_trace(request_id: str, components: GatewayComponents = Depends(g
     if trace is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, TRACE_NOT_FOUND_DETAIL.format(request_id=request_id))
     return trace
+
+
+class PolicyRules(BaseModel):
+    version: str
+    revision: str
+    rules: list[dict[str, Any]]
+
+
+class PolicyRulesUpdate(BaseModel):
+    # The revision the edit was based on, so two dashboards cannot silently overwrite each other.
+    revision: str
+    rules: list[dict[str, Any]]
+
+
+def get_policy_rules_admin(components: GatewayComponents = Depends(get_components)) -> PolicyRulesAdmin:
+    if components.policy_rules_admin is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, POLICY_RULES_UNAVAILABLE_DETAIL)
+    return components.policy_rules_admin
+
+
+@router.get("/policy/rules")
+def get_policy_rules(rules_admin: PolicyRulesAdmin = Depends(get_policy_rules_admin)) -> PolicyRules:
+    return PolicyRules(**asdict(rules_admin.get_rules()))
+
+
+@router.put("/policy/rules")
+def replace_policy_rules(
+    update: PolicyRulesUpdate, rules_admin: PolicyRulesAdmin = Depends(get_policy_rules_admin),
+) -> PolicyRules:
+    try:
+        return PolicyRules(**asdict(rules_admin.replace_rules(update.rules, update.revision)))
+    except InvalidPolicyError as error:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
+    except StalePolicyRevisionError as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+
+
+@router.post("/policy/rules/restore-defaults")
+def restore_default_policy_rules(rules_admin: PolicyRulesAdmin = Depends(get_policy_rules_admin)) -> PolicyRules:
+    return PolicyRules(**asdict(rules_admin.restore_default_rules()))

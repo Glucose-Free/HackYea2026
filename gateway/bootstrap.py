@@ -20,6 +20,7 @@ from gateway.core.gateway import Gateway
 from gateway.guards.contract import GuardDependencies
 from gateway.guards.registry import GuardRegistry
 from gateway.identity.resolver import OpenWebUiHeaderResolver
+from gateway.policy.rules_admin import PolicyRulesAdmin
 from gateway.jev.client import GraniteGuardianJevClient, JevClient, StubJevClient, TypeSafeJevClient
 
 GATEWAY_CONFIG_PATH_ENV = "GATEWAY_CONFIG_PATH"
@@ -28,10 +29,13 @@ AUDIT_LOG_PATH_ENV = "AUDIT_LOG_PATH"
 AUDIT_ANCHOR_PATH_ENV = "AUDIT_ANCHOR_PATH"
 GATEWAY_API_KEY_ENV = "GATEWAY_API_KEY"
 REPORT_ACCESS_TOKEN_ENV = "REPORT_ACCESS_TOKEN"
+POLICY_RULES_PATH_ENV = "POLICY_RULES_PATH"
+POLICY_DEFAULT_RULES_PATH_ENV = "POLICY_DEFAULT_RULES_PATH"
 DEFAULT_CONFIG_PATH = "config/gateway.toml"
 DEFAULT_CONFIG_HISTORY_DIR = "data/config_history"
 DEFAULT_AUDIT_LOG_PATH = "data/audit.jsonl"
 DEFAULT_AUDIT_ANCHOR_PATH = "data/audit.anchor.json"
+DEFAULT_POLICY_DEFAULT_RULES_PATH = "examples/bank_demo_rules.json"
 MISSING_ENV_ERROR = "environment variable {name} must be set"
 # The defaults in docker-compose.yml and .env.example; they are public, so anyone can use them.
 PUBLISHED_DEMO_SECRETS = frozenset({"demo-gateway-key", "demo-report-token"})
@@ -78,6 +82,14 @@ async def open_chat_model(chat_model_config: ChatModelConfig, exit_stack: AsyncE
     )
 
 
+def build_policy_rules_admin() -> PolicyRulesAdmin | None:
+    rules_path = os.environ.get(POLICY_RULES_PATH_ENV, "").strip()
+    if not rules_path:
+        return None
+    default_rules_path = os.environ.get(POLICY_DEFAULT_RULES_PATH_ENV, DEFAULT_POLICY_DEFAULT_RULES_PATH)
+    return PolicyRulesAdmin(Path(rules_path), Path(default_rules_path))
+
+
 @asynccontextmanager
 async def open_components_from_environment() -> AsyncIterator[GatewayComponents]:
     gateway_api_key = get_required_secret_env(GATEWAY_API_KEY_ENV)
@@ -109,4 +121,5 @@ async def open_components_from_environment() -> AsyncIterator[GatewayComponents]
             gateway_api_key=gateway_api_key,
             audit_query=JsonlAuditQuery(audit_log),
             report_access_token=report_access_token,
+            policy_rules_admin=build_policy_rules_admin(),
         )

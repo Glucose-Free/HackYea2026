@@ -20,15 +20,18 @@ REPORT_TOKEN = "report-token"
 CHAT_HEADERS = {"Authorization": "Bearer k", "X-OpenWebUI-User-Id": "u-alice", "X-OpenWebUI-User-Name": "Alice"}
 
 
-def build_client(tmp_path: Path, chat_model: FakeChatModel) -> TestClient:
+def build_components(tmp_path: Path, chat_model: FakeChatModel) -> GatewayComponents:
     audit_log = AuditLog(tmp_path / "audit.jsonl")
     pipelines = CheckpointPipelines("v-test", GuardPipeline([build_jev_guard(StubJevClient())]))
     gateway = Gateway(FixedPipelineSource(pipelines), ChatAgent(chat_model, FakeToolProvider(), 8), audit_log)
-    components = GatewayComponents(
+    return GatewayComponents(
         gateway=gateway, audit_log=audit_log, identity_resolver=OpenWebUiHeaderResolver(), gateway_api_key="k",
         audit_query=JsonlAuditQuery(audit_log), report_access_token=REPORT_TOKEN,
     )
-    return TestClient(create_app(components))
+
+
+def build_client(tmp_path: Path, chat_model: FakeChatModel) -> TestClient:
+    return TestClient(create_app(build_components(tmp_path, chat_model)))
 
 
 def send_chat(client: TestClient, text: str) -> None:
@@ -46,6 +49,7 @@ def client(tmp_path: Path):
 
 @pytest.mark.parametrize("path", [
     "/admin/fetches/totals", "/admin/users/fetch-stats", "/admin/requests", "/admin/requests/status-counts", "/admin/requests/x/trace", "/audit", "/report",
+    "/admin/policy/rules",
 ])
 def test_admin_endpoints_require_token(client: TestClient, path: str):
     assert client.get(path).status_code == 401
