@@ -15,12 +15,18 @@ def default_rules() -> list[PolicyRuleConfig]:
     rows = [PolicyRuleConfig("identify_via_account", DatalogRule(
         "identify_via_account", k("?u", "?s", "identity", "?c"),
         (k("?u", "?s", "subject_account", "?a"), k("?u", "?a", "account_owner", "?c"))))]
-    for relation in ("identity", "contact_data", "workplace_data"):
+    rows.append(PolicyRuleConfig("block_aml_identity", DatalogRule("block_aml_identity",
+        DatalogAtom("violation", ("?u", "?s", "block_aml_identity")),
+        (k("?u", "?s", "aml_review", "?status"), k("?u", "?s", "identity", "?c")))))
+    # Contact and workplace facts are keyed by customer, not AML subject, so they join through identity.
+    # They only matter when block_aml_identity is disabled; they keep each disclosure independently blockable.
+    for relation in ("contact_data", "workplace_data"):
         name = f"block_aml_{relation}"
         rows.append(PolicyRuleConfig(name, DatalogRule(name,
             DatalogAtom("violation", ("?u", "?s", name)),
             (k("?u", "?s", "aml_review", "?status"),
-             k("?u", "?s", relation, "?value")))))
+             k("?u", "?s", "identity", "?c"),
+             k("?u", "?c", relation, "?value")))))
     return rows
 
 
@@ -153,7 +159,7 @@ def build_registry() -> ToolRegistry:
 
 def initialize_demo(db_path: str, rules_path: str) -> PolicyMiddleware:
     config = PolicyConfigStore(rules_path)
-    config.initialize(default_rules(), "aml-v2")
+    config.initialize(default_rules(), "aml-v3")
     return PolicyMiddleware(KnowledgeStore(db_path), config, build_registry())
 
 

@@ -1,6 +1,5 @@
 import sys
 from pathlib import Path
 
-# Appended, not prepended: the repo root holds mcp.py, which would otherwise
-# shadow the installed mcp SDK that the gateway imports.
+# The policy engine (policy_middleware.py, examples/) lives at the repo root, outside the installed package.
 sys.path.append(str(Path(__file__).parent))

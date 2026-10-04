@@ -12,7 +12,7 @@ from policy_middleware import (
     PolicyRuleConfig, TrustedPrincipal,
 )
 
-from examples.aml import AMLToolAdapter, build_registry, demo_executor, initialize_demo
+from examples.aml import AMLToolAdapter, build_registry, default_rules as aml_default_rules, demo_executor, initialize_demo
 
 
 def demo_principal(tenant, user, role="restricted_analyst"):
@@ -75,10 +75,40 @@ class PolicyTests(unittest.TestCase):
         self.assertIsNone(reply.data)
         self.assertEqual(len(self.calls), before)
 
+    def test_policy_violation_names_the_violated_rules_for_audit_only(self):
+        self.call("get_aml_case_summary", {"subject_id": "S17"})
+        reply = self.call("resolve_aml_subject", {"subject_id": "S17"})
+        self.assertEqual(reply.violated_rule_ids, ("block_aml_identity",))
+        self.assertNotIn("block_aml_identity", json.dumps(reply.as_dict()))
+
+    def test_refusal_that_is_not_a_policy_violation_names_no_rules(self):
+        reply = self.call("resolve_aml_subject", {"subject_id": "not-an-id"})
+        self.assertFalse(reply.allowed)
+        self.assertEqual(reply.violated_rule_ids, ())
+
     def test_reverse_order_is_blocked(self):
         self.call("resolve_aml_subject", {"subject_id": "S17"})
         self.assertFalse(self.call("get_aml_case_summary", {"subject_id": "S17"}).allowed)
         self.assertEqual(len(self.calls), 1)
+
+    def disable_rule(self, rule_id):
+        rules = [PolicyRuleConfig(r.rule_id, r.rule, enabled=r.rule_id != rule_id)
+                 for r in aml_default_rules()]
+        self.middleware.config_store.save(rules, "aml-without-" + rule_id)
+
+    def test_contact_of_identified_aml_subject_is_blocked_even_when_identity_is_allowed(self):
+        self.disable_rule("block_aml_identity")
+        self.call("get_aml_case_summary", {"subject_id": "S17"})
+        self.assertTrue(self.call("resolve_aml_subject", {"subject_id": "S17"}).allowed)
+        self.assertFalse(self.call("get_customer_contact", {"customer_id": "C17"}).allowed)
+        self.assertFalse(self.call("get_customer_workplace", {"customer_id": "C17"}).allowed)
+        self.assertTrue(self.call("get_customer_contact", {"customer_id": "C99"}).allowed)
+
+    def test_aml_case_of_a_customer_whose_contact_is_known_is_blocked_even_when_identity_is_allowed(self):
+        self.disable_rule("block_aml_identity")
+        self.call("get_customer_contact", {"customer_id": "C17"})
+        self.call("resolve_aml_subject", {"subject_id": "S17"})
+        self.assertFalse(self.call("get_aml_case_summary", {"subject_id": "S17"}).allowed)
 
     def test_denied_fact_not_persisted_and_harmless_query_works(self):
         self.call("get_aml_case_summary", {"subject_id": "S17"})

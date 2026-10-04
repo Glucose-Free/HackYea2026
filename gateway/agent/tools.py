@@ -2,6 +2,7 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, Protocol
 
 from mcp import Client
@@ -13,6 +14,8 @@ TRACEPARENT_META_KEY = "traceparent"
 USER_ID_META_KEY = "ai-control-gateway/user_id"
 SESSION_ID_META_KEY = "ai-control-gateway/session_id"
 DENIED_TOOL_RESULT_PREFIX = "Request denied by the data service: "
+FAILED_TOOL_RESULT_PREFIX = "The data service could not complete the request: "
+DENIED_CHECKPOINT_STEP_OUTCOME = "denied"
 
 
 @dataclass(frozen=True)
@@ -43,11 +46,21 @@ class ToolCallContext:
     caller: ToolCaller
 
 
+class ToolCallOutcome(StrEnum):
+    PASSED = "passed"
+    DENIED = "denied"  # Checkpoint 2 refused it: the server reported a denied checkpoint step.
+    FAILED = "failed"  # Any other error (unknown tool, bad arguments, missing record); the model may retry.
+
+
 @dataclass(frozen=True)
 class ToolCallResult:
     content: str
-    denied: bool
+    outcome: ToolCallOutcome
     checkpoint_steps: tuple[CheckpointStep, ...]
+
+    @property
+    def denied(self) -> bool:
+        return self.outcome is ToolCallOutcome.DENIED
 
 
 class ToolSession(Protocol):
@@ -87,10 +100,11 @@ class McpToolSession:
 
     async def call_tool(self, name: str, arguments: dict[str, Any], call_context: ToolCallContext) -> ToolCallResult:
         result = await self._client.call_tool(name, arguments, meta=build_call_meta(call_context))
+        checkpoint_steps = parse_checkpoint_steps(result)
         return ToolCallResult(
             content=get_result_text(result),
-            denied=result.is_error,
-            checkpoint_steps=parse_checkpoint_steps(result),
+            outcome=get_tool_call_outcome(result.is_error, checkpoint_steps),
+            checkpoint_steps=checkpoint_steps,
         )
 
 
@@ -102,6 +116,14 @@ def build_call_meta(call_context: ToolCallContext) -> dict[str, str]:
         USER_ID_META_KEY: call_context.caller.user_id,
         SESSION_ID_META_KEY: call_context.caller.session_id,
     }
+
+
+def get_tool_call_outcome(is_error: bool, checkpoint_steps: tuple[CheckpointStep, ...]) -> ToolCallOutcome:
+    if not is_error:
+        return ToolCallOutcome.PASSED
+    if any(step.outcome == DENIED_CHECKPOINT_STEP_OUTCOME for step in checkpoint_steps):
+        return ToolCallOutcome.DENIED
+    return ToolCallOutcome.FAILED
 
 
 def get_result_text(result: CallToolResult) -> str:

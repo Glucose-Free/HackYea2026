@@ -158,3 +158,24 @@ def test_store_save_rejects_invalid_config(tmp_path: Path):
 def test_registry_can_hold_test_guards():
     registry = GuardRegistry({"scripted": ScriptedGuard})
     assert registry.get_guard_class("scripted") is ScriptedGuard
+
+
+MONITOR_ONLY_CONFIG = VALID_CONFIG.replace(b'mode = "enforce"', b'mode = "monitor"')
+# A non-atomic editor save, caught between writes: everything up to the first guard is gone.
+TRUNCATED_CONFIG = VALID_CONFIG[:VALID_CONFIG.index(b"[[user_input.guards]]")]
+
+
+@pytest.mark.parametrize("content", [b"", TRUNCATED_CONFIG, MONITOR_ONLY_CONFIG], ids=["empty", "truncated", "monitor-only"])
+def test_config_without_an_enforcing_input_guard_is_rejected(content: bytes):
+    with pytest.raises(ConfigValidationError):
+        parse_config(content)
+
+
+def test_provider_keeps_its_guards_when_the_file_is_truncated_mid_save(tmp_path: Path):
+    store = build_store(tmp_path, VALID_CONFIG)
+    provider = PipelineProvider(store, build_registry(), GuardDependencies(jev_client=FakeJevClient()))
+    first = provider.get_current()
+
+    (tmp_path / "gateway.toml").write_bytes(TRUNCATED_CONFIG)
+
+    assert provider.get_current() is first

@@ -227,7 +227,7 @@ do deskryptora stdout ani logować prywatnych wyników do strumieni klienta.
 ## Testy
 
 ```bash
-python3 -m unittest -v
+uv run pytest tests/policy_engine
 ```
 
 92 testy: regresje wcześniejszego middleware/MCP i 20 testów rozszerzalności.

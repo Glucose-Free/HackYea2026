@@ -6,7 +6,7 @@ from typing import Any, ClassVar, Self
 from pydantic import BaseModel
 
 from gateway.agent.chat_model import ChatModelReply, ToolCallRequest
-from gateway.agent.tools import ToolCallContext, ToolCallResult, ToolDefinition
+from gateway.agent.tools import ToolCallContext, ToolCallOutcome, ToolCallResult, ToolDefinition
 from gateway.guards.contract import GuardDecision, GuardDependencies, GuardVerdict
 from gateway.guards.pipeline import ConfiguredGuard, GuardMode
 from gateway.jev.client import JevNoulAnswers, JevUsage, NoulQuestion
@@ -121,7 +121,7 @@ class FakeToolProvider:
         error: Exception | None = None,
     ):
         self.tools = tools or [ToolDefinition("list_transactions", "List transactions", {"type": "object", "properties": {}})]
-        self.results_by_name = results_by_name or {"list_transactions": ToolCallResult("[{\"id\": 1}]", False, ())}
+        self.results_by_name = results_by_name or {"list_transactions": ToolCallResult("[{\"id\": 1}]", ToolCallOutcome.PASSED, ())}
         self.error = error
         self.calls: list[tuple[str, dict[str, Any], ToolCallContext]] = []
 

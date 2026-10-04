@@ -344,6 +344,9 @@ class MCPDecision:
     reason: str = ""
     data: Any | None = None
     tags: tuple[str, ...] = ()
+    # Audit-only: the trusted host may record it, but as_dict() leaves it out so the model never learns
+    # which rule fired. Empty for refusals that are not policy violations (bad arguments, failures).
+    violated_rule_ids: tuple[str, ...] = ()
 
     @property
     def allowed(self) -> bool:
@@ -354,8 +357,8 @@ class MCPDecision:
                 "reason": self.reason, "data": self.data, "tags": list(self.tags)}
 
 
-def _blocked() -> MCPDecision:
-    return MCPDecision("block", PUBLIC_BLOCK_REASON, tags=("policy_block",))
+def _blocked(violated_rule_ids: tuple[str, ...] = ()) -> MCPDecision:
+    return MCPDecision("block", PUBLIC_BLOCK_REASON, tags=("policy_block",), violated_rule_ids=violated_rule_ids)
 
 
 class KnowledgeStore:
@@ -562,6 +565,10 @@ class ToolRegistry:
         names = self.names_for(principal)
         return [tool.descriptor() for name, tool in self._tools.items() if name in names]
 
+    def list_tools_for_role(self, role: str) -> list[dict]:
+        """For a server whose callers all share one role, so the catalog is known before any caller is."""
+        return [tool.descriptor() for tool in self._tools.values() if role in tool.allowed_roles]
+
     def _tool(self, name: str) -> ToolDefinition:
         if name not in self._tools:
             raise PolicyError("Unregistered tool")
@@ -717,6 +724,7 @@ class PolicyMiddleware:
                 evidence = self._inference(program, principal, history, candidate, request.request_id) or {}
                 if evidence:
                     internal_code = "preflight_violation"
+                    reply = _blocked(tuple(evidence["rule_ids"]))
                 else:
                     internal_code = "tool_execution_failed"
                     if execute is None:
@@ -730,6 +738,7 @@ class PolicyMiddleware:
                     evidence = self._inference(program, principal, history, actual_facts, request.request_id) or {}
                     if evidence:
                         internal_code = "postflight_violation"
+                        reply = _blocked(tuple(evidence["rule_ids"]))
                     else:
                         approved = actual_facts
                         reply = MCPDecision("allow", "Approved disclosure", data, ("policy_allow",))

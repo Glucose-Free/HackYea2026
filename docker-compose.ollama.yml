@@ -1,0 +1,45 @@
+# Real local models instead of the stubs, with no API keys:
+#   docker compose -f docker-compose.yml -f docker-compose.ollama.yml up --build
+# The first start downloads about 4.6 GB of models into the ollama-models volume.
+
+x-ollama-models: &ollama-models "granite3-guardian:2b qwen2.5:3b"
+
+services:
+  ollama:
+    image: ollama/ollama:0.35.1
+    environment:
+      # Keep both models loaded; reloading one costs seconds on every switch between guard and chat.
+      OLLAMA_MAX_LOADED_MODELS: "2"
+      OLLAMA_KEEP_ALIVE: "24h"
+    volumes:
+      - ollama-models:/root/.ollama
+    # frontend, not backend: pulling models needs the internet, and the internal backend network has none.
+    networks: [frontend]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+
+  ollama-pull:
+    image: ollama/ollama:0.35.1
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODELS_TO_PULL: *ollama-models
+    entrypoint: ["sh", "-c", "for model in $$OLLAMA_MODELS_TO_PULL; do ollama pull $$model || exit 1; done"]
+    networks: [frontend]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
+  gateway:
+    environment:
+      GATEWAY_CONFIG_PATH: /app/config/gateway.ollama.toml
+      CHAT_MODEL_API_KEY: ollama
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+
+volumes:
+  ollama-models:

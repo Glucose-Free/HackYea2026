@@ -18,6 +18,8 @@ from policy_middleware import (
 
 from examples.aml import AMLToolAdapter, build_registry, demo_executor, initialize_demo
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 def demo_principal(tenant, user, role="restricted_analyst"):
     return TrustedPrincipal(tenant, user, role=role, dataset_id="bank-demo-v1")
@@ -351,7 +353,7 @@ class MCPTests(unittest.TestCase):
         self.assertEqual(self.server.handle({"jsonrpc": "2.0", "id": 3, "method": "ping", "params": {"x": float("inf")}})["error"]["code"], -32602)
 
     def test_real_subprocess_mcp_handshake_and_mosaic_persists_across_processes(self):
-        root = Path(__file__).resolve().parent
+        root = REPO_ROOT
         command = [sys.executable, str(root / "mcp_policy_server.py"), "--backend", "examples.aml:create_demo_backend", "--db", self.db, "--rules", self.rules]
         messages = [initialize_message(), initialized_message(),
                     {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
@@ -372,7 +374,7 @@ class MCPTests(unittest.TestCase):
         self.assert_blocked(json.loads(restarted.stdout.splitlines()[-1]))
 
     def test_production_backend_factory_is_recipient_bound_and_stdout_is_suppressed(self):
-        root = Path(__file__).resolve().parent
+        root = REPO_ROOT
         backend = Path(self.temp.name) / "test_backend.py"
         backend.write_text('''from policy_middleware import TrustedPrincipal
 from examples.aml import demo_executor, build_registry
@@ -395,7 +397,7 @@ def create_backend():
         self.assertEqual(self.middleware.store.facts_for_user(self.principal), [])
 
     def test_production_mode_does_not_bootstrap_missing_policy(self):
-        root = Path(__file__).resolve().parent
+        root = REPO_ROOT
         backend = Path(self.temp.name) / "test_backend.py"
         backend.write_text('''from policy_middleware import TrustedPrincipal
 from examples.aml import demo_executor, build_registry

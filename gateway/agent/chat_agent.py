@@ -7,8 +7,10 @@ from typing import Any
 from gateway.agent.chat_model import ChatModel, ChatModelReply, ToolCallRequest
 from gateway.agent.tools import (
     DENIED_TOOL_RESULT_PREFIX,
+    FAILED_TOOL_RESULT_PREFIX,
     ToolCallContext,
     ToolCaller,
+    ToolCallOutcome,
     ToolCallResult,
     ToolDefinition,
     ToolProvider,
@@ -26,6 +28,16 @@ FORWARDED_CONVERSATION_ROLES = ("user", "assistant")
 MODEL_TURN_NAME = "model call {turn_number}"
 TOOL_ROUND_LIMIT_ERROR = "model still requested tools after {max_tool_rounds} tool rounds"
 CHECKPOINT_STEP_OUTCOMES = {"passed": StepOutcome.PASSED, "denied": StepOutcome.DENIED}
+FETCH_STEP_OUTCOMES = {
+    ToolCallOutcome.PASSED: StepOutcome.PASSED,
+    ToolCallOutcome.DENIED: StepOutcome.DENIED,
+    ToolCallOutcome.FAILED: StepOutcome.FAILED,
+}
+TOOL_RESULT_PREFIXES = {
+    ToolCallOutcome.PASSED: "",
+    ToolCallOutcome.DENIED: DENIED_TOOL_RESULT_PREFIX,
+    ToolCallOutcome.FAILED: FAILED_TOOL_RESULT_PREFIX,
+}
 
 
 @dataclass(frozen=True)
@@ -112,8 +124,8 @@ class ChatAgent:
             )
             raise
         fetch_step_id = recorder.add_step(
-            TraceStepKind.DATA_FETCH, tool_call.name, StepOutcome.DENIED if result.denied else StepOutcome.PASSED,
-            parent_step_id=turn_step_id, reason=result.content if result.denied else "",
+            TraceStepKind.DATA_FETCH, tool_call.name, FETCH_STEP_OUTCOMES[result.outcome],
+            parent_step_id=turn_step_id, reason="" if result.outcome is ToolCallOutcome.PASSED else result.content,
             detail={**detail, "result_chars": len(result.content)}, started_at=started_at, duration_ms=get_elapsed_ms(started),
         )
         for checkpoint_step in result.checkpoint_steps:
@@ -147,7 +159,7 @@ def build_assistant_tool_call_message(model_reply: ChatModelReply) -> dict[str, 
 
 
 def build_tool_result_message(tool_call: ToolCallRequest, result: ToolCallResult) -> dict[str, Any]:
-    content = DENIED_TOOL_RESULT_PREFIX + result.content if result.denied else result.content
+    content = TOOL_RESULT_PREFIXES[result.outcome] + result.content
     return {"role": "tool", "tool_call_id": tool_call.call_id, "content": content}
 
 

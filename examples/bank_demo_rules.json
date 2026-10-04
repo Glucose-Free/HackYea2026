@@ -1,0 +1,75 @@
+{
+  "version": "bank-demo-v1",
+  "rules": [
+    {
+      "rule_id": "aml_contact",
+      "enabled": true,
+      "rule": {
+        "name": "aml_contact",
+        "head": {
+          "predicate": "violation",
+          "terms": [
+            "?u",
+            "?customer",
+            "aml_contact"
+          ]
+        },
+        "body": [
+          {
+            "predicate": "knows",
+            "terms": [
+              "?u",
+              "?customer",
+              "aml_review",
+              "?status"
+            ]
+          },
+          {
+            "predicate": "knows",
+            "terms": [
+              "?u",
+              "?customer",
+              "contact_data",
+              "?value"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "rule_id": "aml_workplace",
+      "enabled": true,
+      "rule": {
+        "name": "aml_workplace",
+        "head": {
+          "predicate": "violation",
+          "terms": [
+            "?u",
+            "?customer",
+            "aml_workplace"
+          ]
+        },
+        "body": [
+          {
+            "predicate": "knows",
+            "terms": [
+              "?u",
+              "?customer",
+              "aml_review",
+              "?status"
+            ]
+          },
+          {
+            "predicate": "knows",
+            "terms": [
+              "?u",
+              "?customer",
+              "workplace_data",
+              "?value"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

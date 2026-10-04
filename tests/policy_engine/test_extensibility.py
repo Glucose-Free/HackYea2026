@@ -15,6 +15,8 @@ from policy_middleware import (
     ToolRegistry, TrustedPrincipal, ValueDomain,
 )
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 def initialize(server):
     server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
@@ -231,7 +233,7 @@ class ExtensibilityTests(unittest.TestCase):
         self.assertEqual(self.middleware.config_store.load()[0], "transactions-v1")
 
     def test_generic_core_and_mcp_import_without_any_example_modules(self):
-        root = Path(__file__).resolve().parent
+        root = REPO_ROOT
         isolated = Path(self.temp.name) / "isolated"
         isolated.mkdir()
         for filename in ("policy_middleware.py", "mcp_policy_server.py"):
@@ -245,7 +247,7 @@ assert not any(name == "examples" or name.startswith("examples.") for name in sy
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_second_domain_actual_stdio_subprocess(self):
-        root = Path(__file__).resolve().parent
+        root = REPO_ROOT
         messages = [
             {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
                 "protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "test", "version": "1"}}},

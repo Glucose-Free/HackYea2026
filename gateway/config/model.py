@@ -9,7 +9,9 @@ from gateway.guards.contract import GuardDecision
 from gateway.guards.pipeline import GuardMode
 
 DUPLICATE_INSTANCE_ID_ERROR = "guard instance ids must be unique within a checkpoint, duplicated: {instance_ids}"
+NO_ENFORCING_INPUT_GUARD_ERROR = "user_input needs at least one guard with mode = \"enforce\""
 DEFAULT_JEV_MODEL = "jev-latest"
+DEFAULT_OLLAMA_URL = "http://ollama:11434"
 DEFAULT_CHAT_MODEL_API_KEY_ENV = "CHAT_MODEL_API_KEY"
 DEFAULT_DATA_MCP_URL = "http://data-mcp:8001/mcp"
 
@@ -42,11 +44,13 @@ class CheckpointConfig(StrictModel):
 class JevAdapter(StrEnum):
     STUB = "stub"
     TYPESAFE = "typesafe"
+    GRANITE_GUARDIAN = "granite_guardian"
 
 
 class JevConfig(StrictModel):
     adapter: JevAdapter = JevAdapter.STUB
     model: str = DEFAULT_JEV_MODEL
+    base_url: str = DEFAULT_OLLAMA_URL  # Ollama server, used by the granite_guardian adapter only.
 
 
 class ChatModelAdapter(StrEnum):
@@ -72,6 +76,13 @@ class GatewayConfig(StrictModel):
     jev: JevConfig = Field(default_factory=JevConfig)
     chat_model: ChatModelConfig = Field(default_factory=ChatModelConfig)
     data_mcp: DataMcpConfig = Field(default_factory=DataMcpConfig)
+
+    @model_validator(mode="after")
+    def require_enforcing_user_input_guard(self) -> Self:
+        # An empty or half-saved file is valid TOML; accepting it would hot-reload a checkpoint that allows everything.
+        if not any(guard.mode is GuardMode.ENFORCE for guard in self.user_input.guards):
+            raise ValueError(NO_ENFORCING_INPUT_GUARD_ERROR)
+        return self
 
 
 @dataclass(frozen=True)

@@ -1,3 +1,4 @@
+import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -9,7 +10,7 @@ from typesafe_sdk import AsyncTypeSafeClient
 from gateway.agent.chat_agent import ChatAgent
 from gateway.agent.chat_model import ChatModel, OpenAiCompatibleChatModel, StubChatModel
 from gateway.agent.tools import McpToolProvider
-from gateway.audit.log import AuditLog
+from gateway.audit.log import AuditAnchorFile, AuditLog
 from gateway.audit.query import JsonlAuditQuery
 from gateway.components import GatewayComponents
 from gateway.config.model import ChatModelAdapter, ChatModelConfig, JevAdapter, JevConfig
@@ -19,17 +20,27 @@ from gateway.core.gateway import Gateway
 from gateway.guards.contract import GuardDependencies
 from gateway.guards.registry import GuardRegistry
 from gateway.identity.resolver import OpenWebUiHeaderResolver
-from gateway.jev.client import JevClient, StubJevClient, TypeSafeJevClient
+from gateway.jev.client import GraniteGuardianJevClient, JevClient, StubJevClient, TypeSafeJevClient
 
 GATEWAY_CONFIG_PATH_ENV = "GATEWAY_CONFIG_PATH"
 GATEWAY_CONFIG_HISTORY_DIR_ENV = "GATEWAY_CONFIG_HISTORY_DIR"
 AUDIT_LOG_PATH_ENV = "AUDIT_LOG_PATH"
+AUDIT_ANCHOR_PATH_ENV = "AUDIT_ANCHOR_PATH"
 GATEWAY_API_KEY_ENV = "GATEWAY_API_KEY"
 REPORT_ACCESS_TOKEN_ENV = "REPORT_ACCESS_TOKEN"
 DEFAULT_CONFIG_PATH = "config/gateway.toml"
 DEFAULT_CONFIG_HISTORY_DIR = "data/config_history"
 DEFAULT_AUDIT_LOG_PATH = "data/audit.jsonl"
+DEFAULT_AUDIT_ANCHOR_PATH = "data/audit.anchor.json"
 MISSING_ENV_ERROR = "environment variable {name} must be set"
+# The defaults in docker-compose.yml and .env.example; they are public, so anyone can use them.
+PUBLISHED_DEMO_SECRETS = frozenset({"demo-gateway-key", "demo-report-token"})
+DEMO_SECRET_WARNING = (
+    "%s is set to a published demo value: anyone who reads the repo can use it. "
+    "Set a random value in .env before exposing this gateway beyond a local demo."
+)
+
+logger = logging.getLogger(__name__)
 
 
 def get_required_env(name: str) -> str:
@@ -39,9 +50,21 @@ def get_required_env(name: str) -> str:
     return value
 
 
+def get_required_secret_env(name: str) -> str:
+    # Warn rather than refuse, so `docker compose up` keeps working with no setup.
+    value = get_required_env(name)
+    if value in PUBLISHED_DEMO_SECRETS:
+        logger.warning(DEMO_SECRET_WARNING, name)
+    return value
+
+
 async def open_jev_client(jev_config: JevConfig, exit_stack: AsyncExitStack) -> JevClient:
     if jev_config.adapter is JevAdapter.STUB:
         return StubJevClient()
+    if jev_config.adapter is JevAdapter.GRANITE_GUARDIAN:
+        # No client-side timeout: each guard's timeout_ms bounds the call and decides on_error.
+        http_client = await exit_stack.enter_async_context(httpx.AsyncClient(timeout=None))
+        return GraniteGuardianJevClient(http_client, jev_config.base_url, jev_config.model)
     sdk_client = await exit_stack.enter_async_context(AsyncTypeSafeClient(model=jev_config.model))
     return TypeSafeJevClient(sdk_client, jev_config.model)
 
@@ -57,8 +80,8 @@ async def open_chat_model(chat_model_config: ChatModelConfig, exit_stack: AsyncE
 
 @asynccontextmanager
 async def open_components_from_environment() -> AsyncIterator[GatewayComponents]:
-    gateway_api_key = get_required_env(GATEWAY_API_KEY_ENV)
-    report_access_token = get_required_env(REPORT_ACCESS_TOKEN_ENV)
+    gateway_api_key = get_required_secret_env(GATEWAY_API_KEY_ENV)
+    report_access_token = get_required_secret_env(REPORT_ACCESS_TOKEN_ENV)
     config_path = Path(os.environ.get(GATEWAY_CONFIG_PATH_ENV, DEFAULT_CONFIG_PATH))
     # Adapters are built once from the startup config; only guard pipelines hot-reload.
     startup_config = parse_config(config_path.read_bytes())
@@ -75,7 +98,10 @@ async def open_components_from_environment() -> AsyncIterator[GatewayComponents]
             McpToolProvider(startup_config.data_mcp.url),
             startup_config.chat_model.max_tool_rounds,
         )
-        audit_log = AuditLog(Path(os.environ.get(AUDIT_LOG_PATH_ENV, DEFAULT_AUDIT_LOG_PATH)))
+        audit_log = AuditLog(
+            Path(os.environ.get(AUDIT_LOG_PATH_ENV, DEFAULT_AUDIT_LOG_PATH)),
+            AuditAnchorFile(Path(os.environ.get(AUDIT_ANCHOR_PATH_ENV, DEFAULT_AUDIT_ANCHOR_PATH))),
+        )
         yield GatewayComponents(
             gateway=Gateway(PipelineProvider(store, registry, guard_dependencies), chat_agent, audit_log),
             audit_log=audit_log,
