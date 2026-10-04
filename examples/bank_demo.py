@@ -27,7 +27,7 @@ from examples.bank_demo_seed import (
     ANOMALY_PATTERNS, AML_STATUSES, AS_OF_DATE, CHANNELS, DIRECTIONS, HISTORY_START_DATE, RISK_LEVELS, SEGMENTS,
 )
 
-from policy_middleware import (
+from policy_engine.middleware import (
     DatalogAtom, DatalogRule, KnowledgeFact, PlannedFact, PolicyError, PolicyRuleConfig,
     ToolDefinition, ToolRegistry, ValueDomain, require_fields, validate_text,
 )

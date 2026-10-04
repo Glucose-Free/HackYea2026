@@ -111,11 +111,19 @@ gateway/
     trace.py                TraceStep, TraceRecorder (builds a request's steps)
     query.py                AuditQuery protocol, JsonlAuditQuery
     report.py               HTML reports (current report.py)
+policy_engine/               checkpoint 2, domain-agnostic
+  middleware.py             Datalog engine, knowledge store, tool contracts
+  mcp_http_server.py        streamable-HTTP MCP server the gateway calls
+  mcp_stdio_server.py       stdio MCP server, one principal per process
+examples/
+  bank_demo*.py, *.json     the demo bank: data tools, queries, data generator, rules
+  aml.py, transactions.py   smaller domains on the same engine
 config/
   gateway.toml              default config
 deploy/
-  stub_mcp/                 stand-in data MCP server (fake data) until the real one exists
+  policy_mcp/               data-mcp entry point (engine + bank demo)
   open_webui/               demo account seeding
+  demo_audit/               demo audit-log seeding
 tests/
   fakes.py                  FakeJevClient, FakeChatModel, FakeToolProvider
   ...
@@ -499,7 +507,7 @@ gain.
 |---|---|---|
 | `gateway` | built from `Dockerfile` | `python:3.12-slim` + uv, dependencies locked by `uv.lock`; runs uvicorn; healthcheck on `/health` |
 | `open-webui` | official Open WebUI image | starts after `gateway` is healthy; pre-configured, see below |
-| `data-mcp` | the other developer's MCP server image (black box) | until that image exists, `deploy/stub_mcp/` stands in: a few tools over fake data, one of which can return a refusal, so the demo runs end to end. Only the MCP tool interface is assumed. |
+| `data-mcp` | built from `Dockerfile` | `python -m deploy.policy_mcp.server`: the policy engine over the generated bank database. The gateway assumes only the MCP tool interface in `docs/contracts/data-mcp-server.md`. |
 
 - `docker-compose.yml` sits at the repo root so `docker compose up` works
   without flags.

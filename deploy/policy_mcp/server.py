@@ -1,6 +1,6 @@
 """The demo's data MCP server: the Datalog policy engine over the bank demo's data tools and database.
 
-Run as a module (`python -m deploy.policy_mcp.server`) so the repo root, where the engine lives, is importable.
+Run as a module (`python -m deploy.policy_mcp.server`) from the repo root.
 """
 
 import os
@@ -8,8 +8,8 @@ from pathlib import Path
 
 from examples import bank_demo
 from examples.bank_demo_seed import ensure_bank_demo_database
-from mcp_policy_http_server import PolicyHttpMCPServer, ServedScope
-from policy_middleware import KnowledgeStore, PolicyConfigStore, PolicyMiddleware
+from policy_engine.mcp_http_server import PolicyHttpMCPServer, ServedScope
+from policy_engine.middleware import KnowledgeStore, PolicyConfigStore, PolicyMiddleware
 
 HOST_ENV = "POLICY_MCP_HOST"
 PORT_ENV = "POLICY_MCP_PORT"

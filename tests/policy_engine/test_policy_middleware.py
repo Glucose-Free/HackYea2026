@@ -6,7 +6,7 @@ import tempfile
 import threading
 import unittest
 
-from policy_middleware import (
+from policy_engine.middleware import (
     DatalogAtom, DatalogProgram, DatalogRule, InferenceLimit, KnowledgeFact, KnowledgeStore,
     LegacyDatabaseError, MCPRequest, PolicyConfigStore, PolicyError, PolicyMiddleware,
     PolicyRuleConfig, TrustedPrincipal,

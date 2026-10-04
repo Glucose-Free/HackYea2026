@@ -4,11 +4,11 @@ A gateway between employees and an internal LLM data assistant. Every chat messa
 
 ```
 Open WebUI ──▶ Gateway ──▶ Checkpoint 1: semantic guards (Jev) ──▶ chat model ⇄ MCP tools ──▶ data MCP server
-                                         refuse ─▶ user                               └─ Checkpoint 2 (black box): SQL middleware ─▶ DB
+                                         refuse ─▶ user                               └─ Checkpoint 2: Datalog policy ─▶ DB
 ```
 
 - **Checkpoint 1 (this repo):** a config-driven pipeline of guards that run on the user's latest message. The built-in guard asks [TypeSafe Jev](https://docs.typesafe.ai/introduction) yes/no questions such as "is this a prompt injection?" and refuses above a threshold.
-- **Checkpoint 2 (black box):** lives inside the data MCP server. It applies query-based rules that stop inference attacks. The gateway only sees its result.
+- **Checkpoint 2:** a Datalog policy engine inside the data MCP server (`policy_engine/`). It remembers what each user already knows and refuses a read that would complete a forbidden combination of facts. The gateway only sees its result.
 - **Audit:** each request is stored as one trace (prompt → checkpoint → guards → model turns → data fetches → middleware steps → reply) in a hash-chained JSONL log. After every write the event count and latest hash go to an anchor file on a separate volume, so `/audit/verify` also catches a log that was cut short, emptied or rehashed. Anyone who can write both volumes can still forge both; for stronger evidence, copy the `head` from `/audit/verify` somewhere the gateway host cannot write.
 
 ## Quickstart
@@ -169,17 +169,29 @@ A prompt refused at checkpoint 1 counts as one denied fetch attempt (`denied_at 
 
 ## Policy engine (checkpoint 2)
 
-`policy_middleware.py` is the checkpoint-2 engine. For each tool call it plans which facts the result could disclose, runs a bounded Datalog program over what the user already knows plus the plan, and runs the read only when no `violation` can be derived. Approved facts are stored per user in SQLite, so knowledge carries across chats. [README2.md](README2.md) (Polish) describes the engine in depth.
+`policy_engine/middleware.py` is the checkpoint-2 engine. It knows no domain: tools, facts and rules come from a domain module such as `examples/bank_demo.py`. For each tool call it plans which facts the result could disclose, runs a bounded Datalog program over what the user already knows plus the plan, and runs the read only when no `violation` can be derived. Approved facts are stored per user in SQLite, so knowledge carries across chats. [docs/policy-engine.md](docs/policy-engine.md) (Polish) describes the engine in depth.
 
 The `data-mcp` service (`python -m deploy.policy_mcp.server`) serves it over streamable HTTP:
 
-- `mcp_policy_http_server.py` reads the user from each call's `_meta` and denies calls without one. A policy denial returns `checkpoint_steps`, so the dashboard trace ends at the `datalog_policy` step.
-- `examples/bank_demo.py` defines the seven data tools and their disclosure plans. `examples/bank_demo_db.py` holds the schema and the read-only queries, and `examples/bank_demo_seed.py` generates the data. `examples/bank_demo_rules.json` holds the default rules (`aml_contact`, `aml_workplace`).
+- `policy_engine/mcp_http_server.py` reads the user from each call's `_meta` and denies calls without one. A policy denial returns `checkpoint_steps`, so the dashboard trace ends at the `datalog_policy` step.
+- `examples/bank_demo.py` defines the twelve data tools and their disclosure plans. `examples/bank_demo_db.py` holds the schema and the read-only queries, and `examples/bank_demo_seed.py` generates the data. `examples/bank_demo_rules.json` holds the default rules (`aml_contact`, `aml_workplace`, `history_contact`, `history_workplace`).
 - The live rules are `/data/rules/policy_rules.json` on the `policy-rules` volume, shared by `data-mcp` (which reads it on every tool call and seeds it from the defaults on first start) and the gateway (which edits it for the dashboard).
 - The server trusts the user id the gateway sends, so it sits on an internal `backend` network with only the gateway; its port is not published.
 - Planning cannot know which customer an AML case names before reading it. A user who already knows *any* customer's contact is therefore refused every AML summary. The engine over-blocks rather than look at private data before deciding.
 
 To reset what demo users know: `docker compose down` and `docker volume rm ai-control-layer_policy-data`.
+
+## Repository layout
+
+| Path | What it is |
+|---|---|
+| `gateway/` | The gateway: OpenAI-compatible API, checkpoint 1 guard pipeline, chat agent and MCP client, audit log, dashboard and its admin API |
+| `policy_engine/` | Checkpoint 2, domain-agnostic: the Datalog engine and knowledge store (`middleware.py`), the streamable-HTTP MCP server the gateway calls (`mcp_http_server.py`), and a stdio MCP server for single-user hosts (`mcp_stdio_server.py`) |
+| `examples/` | Domains for the engine. `bank_demo*` is the demo's bank (tools, queries, data generator, rules); `aml.py` and `transactions.py` are smaller domains that show one engine serving several |
+| `deploy/` | Container entry points: the `data-mcp` server, Open WebUI user seeding, demo audit-log seeding |
+| `config/` | Gateway config (guards, models), one file per preset |
+| `docs/` | Design spec, data-MCP contract, engine notes, pitch, TODO |
+| `tests/` | One suite for everything; `tests/policy_engine/` covers the engine on its own |
 
 ## Tests
 

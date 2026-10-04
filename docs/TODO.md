@@ -4,12 +4,12 @@ What is left, by priority. Update it as items land. Design: `docs/superpowers/sp
 
 ## Now: needed for the demo
 
-- [ ] Merge `origin/main` (the policy engine, `50e32de`) into `feat/ai-control-layer`. Expect a conflict in `README.md`: keep ours and add a short paragraph on the policy engine.
+- [x] Merge `origin/main` (the policy engine, `50e32de`) into `feat/ai-control-layer`. Expect a conflict in `README.md`: keep ours and add a short paragraph on the policy engine.
 - [ ] Rebuild and smoke-test the stack: `docker compose up --build`. Then log in at http://localhost:3000 and run the README demo script. The image has never been built from the current code.
 - [ ] Push the branch and open a PR.
 - [ ] Before showing it to anyone, replace the demo secrets in `.env` (the gateway now logs a warning while they are in use) (`GATEWAY_API_KEY`, `REPORT_ACCESS_TOKEN`, `WEBUI_SECRET_KEY`, passwords).
-- [x] Bring the data MCP server in line with `docs/contracts/data-mcp-server.md` (`mcp_policy_http_server.py`, `deploy/policy_mcp/`).
-- [ ] Untrack `policy_knowledge.sqlite3` and add `*.sqlite3` to `.gitignore`.
+- [x] Bring the data MCP server in line with `docs/contracts/data-mcp-server.md` (`policy_engine/mcp_http_server.py`, `deploy/policy_mcp/`).
+- [x] Untrack `policy_knowledge.sqlite3` and add `*.sqlite3` to `.gitignore`.
 - [x] Replace the `data-mcp` stub service in `docker-compose.yml` with the real server, and delete `deploy/stub_mcp/`.
 - [ ] Switch to real services once keys exist: `[jev] adapter = "typesafe"` and `[chat_model] adapter = "openai_compatible"` in `config/gateway.toml`, keys in `.env`. Then tune the Jev check wording and `refuse_threshold` on real prompts, including benign ones that mention rules or policies.
 

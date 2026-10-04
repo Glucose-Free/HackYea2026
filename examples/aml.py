@@ -4,7 +4,7 @@ from functools import partial
 from typing import Any, Iterable
 import re
 
-from policy_middleware import (
+from policy_engine.middleware import (
     DatalogAtom, DatalogRule, KnowledgeFact, KnowledgeStore, PlannedFact, PolicyConfigStore,
     PolicyError, PolicyMiddleware, PolicyRuleConfig, ToolDefinition, ToolRegistry,
     TrustedPrincipal, ValueDomain, require_fields, validate_text,
@@ -189,7 +189,7 @@ def create_demo_backend():
 
 def main():
     import argparse
-    from mcp_policy_server import MCPPolicyServer
+    from policy_engine.mcp_stdio_server import MCPPolicyServer
     parser = argparse.ArgumentParser(description="Run the fictional AML example")
     parser.add_argument("--db", required=True)
     parser.add_argument("--rules", required=True)

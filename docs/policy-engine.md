@@ -1,6 +1,6 @@
 # Control Layer: reguły relacyjne i kontrola ujawnień
 
-Python 3.11+, biblioteka standardowa. Rdzeń i serwer MCP są niezależne od domeny.
+Python 3.12, biblioteka standardowa. Rdzeń i serwer MCP są niezależne od domeny.
 AML jest jednym z opcjonalnych przykładów. Drugi przykład chroni przed poznaniem
 obu stron tej samej transakcji. Oba korzystają z tego samego middleware i MCP.
 
@@ -8,8 +8,10 @@ obu stron tej samej transakcji. Oba korzystają z tego samego middleware i MCP.
 
 | Plik | Odpowiedzialność |
 |---|---|
-| `policy_middleware.py` | Interpreter dodatniego Datalogu, historia odbiorcy, preflight/postflight, audyt i kontrakty narzędzi |
-| `mcp_policy_server.py` | JSON-RPC, lifecycle MCP, stdio i katalog pobierany z rejestru middleware |
+| `policy_engine/middleware.py` | Interpreter dodatniego Datalogu, historia odbiorcy, preflight/postflight, audyt i kontrakty narzędzi |
+| `policy_engine/mcp_stdio_server.py` | JSON-RPC, lifecycle MCP, stdio i katalog pobierany z rejestru middleware |
+| `policy_engine/mcp_http_server.py` | Serwer MCP (streamable HTTP) dla gatewaya: użytkownik z `_meta` każdego wywołania, wielu użytkowników w jednym procesie |
+| `examples/bank_demo*.py` | Domena demo: narzędzia banku, zapytania SQL, generator danych i reguły |
 | `examples/aml.py` | Narzędzia AML, schematy odpowiedzi, planowanie ujawnień i fikcyjne dane |
 | `examples/aml_rules.json` | Przykładowe reguły AML |
 | `examples/transactions.py` | Narzędzia ujawniające jedną stronę transakcji i fikcyjne dane |
@@ -49,7 +51,7 @@ kontrola wykonania nie może polegać wyłącznie na walidacji przez klienta.
 Przykład składania katalogów przez zaufany host:
 
 ```python
-from policy_middleware import ToolRegistry
+from policy_engine.middleware import ToolRegistry
 from examples import aml, transactions
 
 registry = ToolRegistry([
@@ -110,7 +112,7 @@ musi być opisana w adapterze, również dla późniejszych nowych reguł.
 ## Integracja z backendem
 
 ```python
-from policy_middleware import (
+from policy_engine.middleware import (
     KnowledgeStore, MCPRequest, PolicyConfigStore, PolicyMiddleware, TrustedPrincipal,
 )
 from examples.transactions import build_registry, demo_executor
@@ -147,7 +149,7 @@ z rolą `security_admin`, wyłącznie w swojej organizacji.
 Serwer obsługuje profil stdio protokołu `2025-11-25`: `initialize`,
 `notifications/initialized`, `ping`, `tools/list`, `tools/call`. Klient musi
 zaakceptować wersję zwróconą w negocjacji. Jedna linia UTF-8 zawiera jeden
-komunikat JSON-RPC; brak nagłówków `Content-Length`. Nie ma transportu HTTP,
+komunikat JSON-RPC; brak nagłówków `Content-Length`. Ten serwer nie ma transportu HTTP (ma go `mcp_http_server.py`),
 resources, prompts ani zadań asynchronicznych.
 
 Przykłady z fikcyjnymi danymi, z katalogu projektu:
@@ -161,8 +163,8 @@ Klient MCP uruchamia wybrane polecenie jako subprocess. Moduły przykładów mog
 jawnie utworzyć brakującą przykładową politykę. Ogólny serwer nigdy jej nie tworzy:
 
 ```bash
-python3 mcp_policy_server.py --backend examples.transactions:create_demo_backend --db demo_transactions.sqlite3 --rules examples/transaction_rules.json
-python3 mcp_policy_server.py --backend bank_backend:create_backend --db knowledge.sqlite3 --rules bank_policy.json
+python3 -m policy_engine.mcp_stdio_server --backend examples.transactions:create_demo_backend --db demo_transactions.sqlite3 --rules examples/transaction_rules.json
+python3 -m policy_engine.mcp_stdio_server --backend bank_backend:create_backend --db knowledge.sqlite3 --rules bank_policy.json
 ```
 
 Zaufany moduł `bank_backend` i jego `create_backend()` muszą zostać

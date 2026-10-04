@@ -4,4 +4,4 @@ __pycache__/
 data/
 .env
 audit.jsonl
-selftest_last.json
+*.sqlite3

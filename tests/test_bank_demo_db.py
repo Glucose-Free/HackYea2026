@@ -6,7 +6,7 @@ import pytest
 from examples import bank_demo
 from examples.bank_demo_db import FEATURED_AML_CASE_ID, MAX_RETURNED_ROWS, BankDemoDatabase
 from examples.bank_demo_seed import create_bank_demo_database, ensure_bank_demo_database
-from policy_middleware import PolicyConfigStore
+from policy_engine.middleware import PolicyConfigStore
 
 
 @pytest.fixture(scope="module")
