@@ -11,6 +11,7 @@ from gateway.api.dependencies import get_components, require_gateway_api_key
 from gateway.components import GatewayComponents
 from gateway.core.conversation import Conversation, Message
 from gateway.core.reply import GatewayReply
+from gateway.identity.resolver import OPEN_WEBUI_CHAT_ID_HEADER
 
 MODEL_ID = "company-assistant"
 MODEL_OWNER = "ai-control-gateway"
@@ -71,7 +72,7 @@ async def create_chat_completion(
     latest_user_message = conversation.get_latest_user_message()
     if latest_user_message is None or not latest_user_message.content.strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, MISSING_USER_MESSAGE_DETAIL)
-    reply = await components.gateway.handle(conversation, user)
+    reply = await components.gateway.handle(conversation, user, request.headers.get(OPEN_WEBUI_CHAT_ID_HEADER) or None)
     if body.stream:
         return StreamingResponse(build_stream_lines(reply), media_type=SSE_MEDIA_TYPE)
     return build_completion_body(reply)

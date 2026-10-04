@@ -157,3 +157,22 @@ async def test_audit_write_failure_does_not_break_the_reply(tmp_path: Path):
 
     audit_log.append = failing_append
     assert (await gateway.handle(build_conversation("hello"), ALICE)).outcome is ReplyOutcome.ANSWERED
+
+
+async def test_session_id_reaches_tools_and_audit_with_request_id_fallback(tmp_path: Path):
+    tool_provider = FakeToolProvider()
+    chat_model = FakeChatModel([
+        build_tool_call_reply("list_transactions"), build_answer_reply("one"),
+        build_tool_call_reply("list_transactions"), build_answer_reply("two"),
+    ])
+    gateway, audit_log = build_gateway(tmp_path, chat_model, tool_provider)
+
+    with_chat = await gateway.handle(build_conversation("show data"), ALICE, session_id="chat-42")
+    without_chat = await gateway.handle(build_conversation("show data"), ALICE)
+
+    first_context, second_context = tool_provider.calls[0][2], tool_provider.calls[1][2]
+    assert (first_context.caller.user_id, first_context.caller.session_id) == ("u-alice", "chat-42")
+    assert second_context.caller.session_id == without_chat.request_id
+    events = audit_log.read_events()
+    assert [event["session_id"] for event in events] == ["chat-42", without_chat.request_id]
+    assert with_chat.request_id != without_chat.request_id

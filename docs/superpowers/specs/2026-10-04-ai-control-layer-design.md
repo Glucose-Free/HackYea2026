@@ -34,9 +34,10 @@ adapters for every external system.
 - The data MCP server: predefined SQL queries exposed as MCP tools.
 - Checkpoint 2: the middleware stack inside the MCP server that inspects
   SQL before it reaches the DB. Its rules are query-based, not role-based:
-  they stop inference attacks built from combinations of queries. The
-  gateway passes nothing to it but tool calls; the user's identity is not
-  forwarded.
+  they stop inference attacks built from combinations of queries. Its
+  knowledge accumulates per user across sessions, so the gateway sends the
+  caller's user id and session id in each tool call's `_meta`. The
+  contract is in `docs/contracts/data-mcp-server.md`.
 
 **Deferred**
 
@@ -306,8 +307,11 @@ guard packages register the same way and need no gateway code changes.
 ### Identity
 
 `IdentityResolver` turns request headers into `UserIdentity` (id, email,
-name). Identity is used for the audit log only. No rule in the gateway
-depends on who the user is, and it is not forwarded to the MCP server. `OpenWebUiHeaderResolver` reads the
+name). No rule in the gateway depends on who the user is. Identity goes to
+the audit log, and the user id (with the Open WebUI chat id, from
+`X-OpenWebUI-Chat-Id`, as session id; the request id when absent) goes to
+the MCP server in `_meta`, never as a model-filled tool argument.
+`OpenWebUiHeaderResolver` reads the
 `X-OpenWebUI-User-*` headers that Open WebUI forwards when
 `ENABLE_FORWARD_USER_INFO_HEADERS` is on.
 

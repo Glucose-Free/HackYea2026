@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 from gateway.agent.chat_agent import ChatAgent
+from gateway.agent.tools import ToolCaller
 from gateway.audit.log import AuditLog
 from gateway.audit.trace import StepOutcome, TraceRecorder, TraceStepKind, new_trace_id
 from gateway.config.provider import CheckpointPipelines
@@ -48,8 +49,10 @@ class Gateway:
         self._chat_agent = chat_agent
         self._audit_log = audit_log
 
-    async def handle(self, conversation: Conversation, user: UserIdentity) -> GatewayReply:
+    async def handle(self, conversation: Conversation, user: UserIdentity, session_id: str | None = None) -> GatewayReply:
         request_id = f"{REQUEST_ID_PREFIX}{uuid.uuid4().hex[:REQUEST_ID_HEX_LENGTH]}"
+        # Without a client chat id each request is its own session; checkpoint 2 still links them by user.
+        caller = ToolCaller(user.user_id, session_id or request_id)
         trace_id = new_trace_id()
         started = time.perf_counter()
         recorder = TraceRecorder()
@@ -59,13 +62,13 @@ class Gateway:
             TraceStepKind.USER_PROMPT, user.user_id, StepOutcome.INFO,
             detail={"message": latest_user_message.content if latest_user_message else "", "config_version": pipelines.config_version},
         )
-        decision = await self._decide_reply(request_id, conversation, pipelines, recorder, root_step_id, trace_id)
+        decision = await self._decide_reply(request_id, conversation, pipelines, recorder, root_step_id, trace_id, caller)
         recorder.add_step(
             TraceStepKind.REPLY, decision.outcome.value, REPLY_STEP_OUTCOMES[decision.outcome],
             parent_step_id=root_step_id, reason=decision.reason, detail={"text": decision.text},
         )
         self._write_audit_event(build_audit_event(
-            request_id, trace_id, user, pipelines.config_version, decision.outcome, decision.reason,
+            request_id, trace_id, user, caller.session_id, pipelines.config_version, decision.outcome, decision.reason,
             recorder.steps, round((time.perf_counter() - started) * 1000, 2),
         ))
         return GatewayReply(request_id, decision.outcome, decision.text)
@@ -78,13 +81,14 @@ class Gateway:
         recorder: TraceRecorder,
         root_step_id: str,
         trace_id: str,
+        caller: ToolCaller,
     ) -> ReplyDecision:
         try:
             verdict = await pipelines.user_input.evaluate(conversation)
             record_checkpoint(recorder, root_step_id, USER_INPUT_CHECKPOINT_NAME, verdict)
             if verdict.refused:
                 return ReplyDecision(ReplyOutcome.REFUSED, REFUSAL_TEXT, get_refusal_reason(verdict))
-            agent_reply = await self._chat_agent.reply(conversation, recorder, root_step_id, trace_id)
+            agent_reply = await self._chat_agent.reply(conversation, recorder, root_step_id, trace_id, caller)
             return ReplyDecision(ReplyOutcome.ANSWERED, agent_reply.answer, "")
         except Exception as error:
             logger.exception(REQUEST_FAILED_MESSAGE, request_id)

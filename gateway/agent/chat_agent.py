@@ -5,7 +5,15 @@ from datetime import UTC, datetime
 from typing import Any
 
 from gateway.agent.chat_model import ChatModel, ChatModelReply, ToolCallRequest
-from gateway.agent.tools import DENIED_TOOL_RESULT_PREFIX, ToolCallResult, ToolDefinition, ToolProvider, ToolSession
+from gateway.agent.tools import (
+    DENIED_TOOL_RESULT_PREFIX,
+    ToolCallContext,
+    ToolCaller,
+    ToolCallResult,
+    ToolDefinition,
+    ToolProvider,
+    ToolSession,
+)
 from gateway.audit.trace import StepOutcome, TraceRecorder, TraceStepKind, build_traceparent, new_span_id
 from gateway.core.conversation import Conversation
 
@@ -36,7 +44,14 @@ class ChatAgent:
         self._tool_provider = tool_provider
         self._max_tool_rounds = max_tool_rounds
 
-    async def reply(self, conversation: Conversation, recorder: TraceRecorder, root_step_id: str, trace_id: str) -> AgentReply:
+    async def reply(
+        self,
+        conversation: Conversation,
+        recorder: TraceRecorder,
+        root_step_id: str,
+        trace_id: str,
+        caller: ToolCaller,
+    ) -> AgentReply:
         messages = build_model_messages(conversation)
         async with self._tool_provider.open_session() as session:
             tools = await session.list_tools()
@@ -48,7 +63,8 @@ class ChatAgent:
                     break
                 messages.append(build_assistant_tool_call_message(model_reply))
                 for tool_call in model_reply.tool_calls:
-                    result = await self._run_fetch(session, tool_call, recorder, turn_step_id, trace_id)
+                    call_context = ToolCallContext(build_traceparent(trace_id, new_span_id()), caller)
+                    result = await self._run_fetch(session, tool_call, recorder, turn_step_id, call_context)
                     messages.append(build_tool_result_message(tool_call, result))
         raise ToolRoundLimitExceededError(TOOL_ROUND_LIMIT_ERROR.format(max_tool_rounds=self._max_tool_rounds))
 
@@ -83,13 +99,12 @@ class ChatAgent:
         tool_call: ToolCallRequest,
         recorder: TraceRecorder,
         turn_step_id: str,
-        trace_id: str,
+        call_context: ToolCallContext,
     ) -> ToolCallResult:
-        traceparent = build_traceparent(trace_id, new_span_id())
-        detail = {"arguments": tool_call.arguments, "traceparent": traceparent}
+        detail = {"arguments": tool_call.arguments, "traceparent": call_context.traceparent}
         started_at, started = datetime.now(UTC), time.perf_counter()
         try:
-            result = await session.call_tool(tool_call.name, tool_call.arguments, traceparent)
+            result = await session.call_tool(tool_call.name, tool_call.arguments, call_context)
         except Exception as error:
             recorder.add_step(
                 TraceStepKind.DATA_FETCH, tool_call.name, StepOutcome.FAILED, parent_step_id=turn_step_id,

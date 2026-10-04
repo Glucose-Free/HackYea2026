@@ -133,3 +133,10 @@ def test_empty_messages_is_400_with_clear_detail(tmp_path: Path):
         response = client.post("/v1/chat/completions", headers=AUTH_AND_IDENTITY_HEADERS, json={"messages": []})
     assert response.status_code == 400
     assert "user message" in response.json()["detail"]
+
+
+def test_open_webui_chat_id_becomes_session_id(tmp_path: Path):
+    with build_client(tmp_path, FakeChatModel([build_answer_reply("ok")])) as client:
+        client.post("/v1/chat/completions", headers={**AUTH_AND_IDENTITY_HEADERS, "X-OpenWebUI-Chat-Id": "chat-7"},
+                    json={"messages": [{"role": "user", "content": "hi"}]})
+    assert AuditLog(tmp_path / "audit.jsonl").read_events()[-1]["session_id"] == "chat-7"

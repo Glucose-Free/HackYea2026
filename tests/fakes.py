@@ -6,7 +6,7 @@ from typing import Any, ClassVar, Self
 from pydantic import BaseModel
 
 from gateway.agent.chat_model import ChatModelReply, ToolCallRequest
-from gateway.agent.tools import ToolCallResult, ToolDefinition
+from gateway.agent.tools import ToolCallContext, ToolCallResult, ToolDefinition
 from gateway.guards.contract import GuardDecision, GuardDependencies, GuardVerdict
 from gateway.guards.pipeline import ConfiguredGuard, GuardMode
 from gateway.jev.client import JevNoulAnswers, JevUsage, NoulQuestion
@@ -106,8 +106,8 @@ class FakeToolSession:
     async def list_tools(self) -> list[ToolDefinition]:
         return self._provider.tools
 
-    async def call_tool(self, name: str, arguments: dict[str, Any], traceparent: str) -> ToolCallResult:
-        self._provider.calls.append((name, arguments, traceparent))
+    async def call_tool(self, name: str, arguments: dict[str, Any], call_context: ToolCallContext) -> ToolCallResult:
+        self._provider.calls.append((name, arguments, call_context))
         if self._provider.error is not None:
             raise self._provider.error
         return self._provider.results_by_name[name]
@@ -123,7 +123,7 @@ class FakeToolProvider:
         self.tools = tools or [ToolDefinition("list_transactions", "List transactions", {"type": "object", "properties": {}})]
         self.results_by_name = results_by_name or {"list_transactions": ToolCallResult("[{\"id\": 1}]", False, ())}
         self.error = error
-        self.calls: list[tuple[str, dict[str, Any], str]] = []
+        self.calls: list[tuple[str, dict[str, Any], ToolCallContext]] = []
 
     @asynccontextmanager
     async def open_session(self) -> AsyncIterator[FakeToolSession]:

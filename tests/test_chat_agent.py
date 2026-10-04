@@ -2,12 +2,13 @@ import pytest
 
 from gateway.agent.chat_agent import SYSTEM_PROMPT, ChatAgent, ToolRoundLimitExceededError
 from gateway.agent.chat_model import ChatModelError
-from gateway.agent.tools import DENIED_TOOL_RESULT_PREFIX, CheckpointStep, ToolCallResult, ToolDefinition
+from gateway.agent.tools import DENIED_TOOL_RESULT_PREFIX, CheckpointStep, ToolCallResult, ToolCaller, ToolDefinition
 from gateway.audit.trace import StepOutcome, TraceRecorder, TraceStepKind
 from gateway.core.conversation import Conversation, Message
 from tests.fakes import FakeChatModel, FakeToolProvider, build_answer_reply, build_tool_call_reply
 
 TRACE_ID = "a" * 32
+CALLER = ToolCaller(user_id="u-alice", session_id="chat-1")
 
 
 def build_conversation() -> Conversation:
@@ -25,7 +26,7 @@ def start_trace() -> tuple[TraceRecorder, str]:
 async def test_answers_without_tools():
     chat_model = FakeChatModel([build_answer_reply("hello")])
     recorder, root = start_trace()
-    reply = await ChatAgent(chat_model, FakeToolProvider(), 8).reply(build_conversation(), recorder, root, TRACE_ID)
+    reply = await ChatAgent(chat_model, FakeToolProvider(), 8).reply(build_conversation(), recorder, root, TRACE_ID, CALLER)
 
     assert reply.answer == "hello"
     sent = chat_model.received_messages[0]
@@ -38,12 +39,14 @@ async def test_runs_tool_then_answers_and_records_fetch_with_traceparent():
     chat_model = FakeChatModel([build_tool_call_reply("list_transactions"), build_answer_reply("done")])
     tool_provider = FakeToolProvider()
     recorder, root = start_trace()
-    reply = await ChatAgent(chat_model, tool_provider, 8).reply(build_conversation(), recorder, root, TRACE_ID)
+    reply = await ChatAgent(chat_model, tool_provider, 8).reply(build_conversation(), recorder, root, TRACE_ID, CALLER)
 
     assert reply.answer == "done"
-    name, arguments, traceparent = tool_provider.calls[0]
+    name, arguments, call_context = tool_provider.calls[0]
+    traceparent = call_context.traceparent
     assert (name, arguments) == ("list_transactions", {"n": 0})
     assert traceparent.startswith(f"00-{TRACE_ID}-")
+    assert call_context.caller == CALLER
     second_call_messages = chat_model.received_messages[1]
     assert second_call_messages[-2]["tool_calls"][0]["function"]["name"] == "list_transactions"
     assert second_call_messages[-1] == {"role": "tool", "tool_call_id": "call_0", "content": "[{\"id\": 1}]"}
@@ -65,7 +68,7 @@ async def test_denied_fetch_is_sent_to_model_with_prefix_and_checkpoint_steps_re
     )
     chat_model = FakeChatModel([build_tool_call_reply("get_phones"), build_answer_reply("I can't share that")])
     recorder, root = start_trace()
-    await ChatAgent(chat_model, tool_provider, 8).reply(build_conversation(), recorder, root, TRACE_ID)
+    await ChatAgent(chat_model, tool_provider, 8).reply(build_conversation(), recorder, root, TRACE_ID, CALLER)
 
     assert chat_model.received_messages[1][-1]["content"] == DENIED_TOOL_RESULT_PREFIX + "inference risk"
     fetch_step = next(step for step in recorder.steps if step.kind is TraceStepKind.DATA_FETCH)
@@ -82,7 +85,7 @@ async def test_tool_round_cap_raises():
     chat_model = FakeChatModel([build_tool_call_reply("list_transactions")] * 3)
     recorder, root = start_trace()
     with pytest.raises(ToolRoundLimitExceededError):
-        await ChatAgent(chat_model, FakeToolProvider(), 2).reply(build_conversation(), recorder, root, TRACE_ID)
+        await ChatAgent(chat_model, FakeToolProvider(), 2).reply(build_conversation(), recorder, root, TRACE_ID, CALLER)
     assert len([step for step in recorder.steps if step.kind is TraceStepKind.DATA_FETCH]) == 2
 
 
@@ -90,7 +93,7 @@ async def test_model_error_is_recorded_as_failed_turn_and_propagates():
     chat_model = FakeChatModel([ChatModelError("bad tool arguments")])
     recorder, root = start_trace()
     with pytest.raises(ChatModelError):
-        await ChatAgent(chat_model, FakeToolProvider(), 8).reply(build_conversation(), recorder, root, TRACE_ID)
+        await ChatAgent(chat_model, FakeToolProvider(), 8).reply(build_conversation(), recorder, root, TRACE_ID, CALLER)
     assert recorder.steps[-1].kind is TraceStepKind.AGENT_TURN
     assert recorder.steps[-1].outcome is StepOutcome.FAILED
 
@@ -99,6 +102,6 @@ async def test_tool_transport_error_is_recorded_as_failed_fetch_and_propagates()
     chat_model = FakeChatModel([build_tool_call_reply("list_transactions")])
     recorder, root = start_trace()
     with pytest.raises(ConnectionError):
-        await ChatAgent(chat_model, FakeToolProvider(error=ConnectionError("mcp down")), 8).reply(build_conversation(), recorder, root, TRACE_ID)
+        await ChatAgent(chat_model, FakeToolProvider(error=ConnectionError("mcp down")), 8).reply(build_conversation(), recorder, root, TRACE_ID, CALLER)
     assert recorder.steps[-1].kind is TraceStepKind.DATA_FETCH
     assert recorder.steps[-1].outcome is StepOutcome.FAILED

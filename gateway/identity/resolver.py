@@ -1,10 +1,12 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.parse import unquote
 
 OPEN_WEBUI_USER_ID_HEADER = "X-OpenWebUI-User-Id"
 OPEN_WEBUI_USER_EMAIL_HEADER = "X-OpenWebUI-User-Email"
 OPEN_WEBUI_USER_NAME_HEADER = "X-OpenWebUI-User-Name"
+OPEN_WEBUI_CHAT_ID_HEADER = "X-OpenWebUI-Chat-Id"
 
 
 @dataclass(frozen=True)
@@ -29,5 +31,6 @@ class OpenWebUiHeaderResolver:
         return UserIdentity(
             user_id=user_id,
             email=lowercase_headers.get(OPEN_WEBUI_USER_EMAIL_HEADER.lower(), "").strip(),
-            name=lowercase_headers.get(OPEN_WEBUI_USER_NAME_HEADER.lower(), "").strip(),
+            # Open WebUI percent-encodes the name so non-ASCII names survive HTTP headers.
+            name=unquote(lowercase_headers.get(OPEN_WEBUI_USER_NAME_HEADER.lower(), "").strip()),
         )
