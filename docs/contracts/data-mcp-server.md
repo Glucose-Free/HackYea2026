@@ -2,7 +2,7 @@
 
 What the gateway expects from the data MCP server (checkpoint 2, the black box), and what it sends. Anything not listed here is up to the server.
 
-Status: implemented by `mcp_policy_http_server.py` with the tools in `examples/bank_demo.py` (the `data-mcp` service). The tool table below is the original proposal. The implementation adds two anonymized listing tools (`list_customers`, `list_aml_cases`), and its facts are `aml_review`, `contact_data` and `workplace_data`, keyed by customer id. The README's *Demo data* section lists the implemented tools.
+Status: implemented by `mcp_policy_http_server.py` with the tools in `examples/bank_demo.py` (the `data-mcp` service). The tool table below is the original proposal. The implementation adds anonymized listing, lookup and statistics tools (`list_customers`, `list_aml_cases`, `list_transactions`, `get_transaction_details`, `get_customer_profile`, `get_statistics`) and a per-customer `list_customer_transactions`. Its facts are `aml_review`, `contact_data`, `workplace_data` and `transaction_history`, keyed by customer id. The README's *Demo data* section lists the implemented tools.
 
 ## How the gateway uses the server
 

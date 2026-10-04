@@ -57,8 +57,8 @@ def put_rules(client: TestClient, rules: list, revision: str):
 
 def test_lists_the_live_rules(client: TestClient):
     policy = get_rules(client)
-    assert policy["version"] == "bank-demo-v1"
-    assert {rule["rule_id"] for rule in policy["rules"]} == {"aml_contact", "aml_workplace"}
+    assert policy["version"] == "bank-demo-v2"
+    assert {rule["rule_id"] for rule in policy["rules"]} == {"aml_contact", "aml_workplace", "history_contact", "history_workplace"}
 
 
 def test_saving_adds_a_rule_and_stamps_a_new_version(client: TestClient, rules_path: Path):
@@ -102,7 +102,7 @@ def test_restore_defaults_brings_back_the_shipped_rules(client: TestClient):
     policy = get_rules(client)
     put_rules(client, [CONTACT_WORKPLACE_RULE], policy["revision"])
     restored = client.post(RESTORE_PATH, headers=HEADERS).json()
-    assert restored["version"] == "bank-demo-v1"
+    assert restored["version"] == "bank-demo-v2"
     assert [rule["rule_id"] for rule in restored["rules"]] == [rule["rule_id"] for rule in policy["rules"]]
 
 

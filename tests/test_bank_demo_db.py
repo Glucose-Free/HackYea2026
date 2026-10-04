@@ -1,9 +1,12 @@
 import sqlite3
+from pathlib import Path
 
 import pytest
 
+from examples import bank_demo
 from examples.bank_demo_db import FEATURED_AML_CASE_ID, MAX_RETURNED_ROWS, BankDemoDatabase
 from examples.bank_demo_seed import create_bank_demo_database, ensure_bank_demo_database
+from policy_middleware import PolicyConfigStore
 
 
 @pytest.fixture(scope="module")
@@ -76,3 +79,9 @@ def test_ensure_keeps_an_existing_database(tmp_path):
     path.write_bytes(b"existing")
     ensure_bank_demo_database(path)
     assert path.read_bytes() == b"existing"
+
+
+def test_the_shipped_rules_file_matches_the_default_rules():
+    version, rules = PolicyConfigStore(str(Path(bank_demo.__file__).with_name("bank_demo_rules.json"))).load()
+    assert version == bank_demo.RULES_VERSION
+    assert list(rules) == bank_demo.default_rules()

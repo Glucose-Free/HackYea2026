@@ -45,20 +45,30 @@ Checkpoint 2 reads a SQLite database of a fictional Polish bank:
 
 | Tool | Arguments | Returns | Facts it records |
 |---|---|---|---|
-| `list_customers` | optional `branch` | id, segment, branch, customer since (no names) | none |
-| `get_transaction_anomalies` | optional `branch` | newest 50 flagged transactions | none |
+| `list_customers` | optional `branch`, `segment` | id, segment, branch, customer since (no names) | none |
+| `list_transactions` | optional `branch`, `channel`, `direction`, `min_amount_pln`, `date_from`, `date_to`, `order_by` (`newest` or `largest`) | up to 50 transactions, no account or customer | none |
+| `get_transaction_anomalies` | optional `branch`, `pattern`, `date_from`, `date_to` | newest 50 flagged transactions | none |
 | `get_blocked_accounts` | none | masked account number, date, reason | none |
-| `list_aml_cases` | none | case id, status, risk level, opening date (no customer) | none |
+| `list_aml_cases` | optional `status`, `risk_level` | case id, status, risk level, opening date (no customer) | none |
 | `get_aml_case_summary` | optional `case_id` (defaults to `AML-2026-0042`) | the case **including its customer id** | `aml_review` for that customer |
 | `get_customer_contact` | `customer_id` | name, phone, email | `contact_data` |
 | `get_customer_workplace` | `customer_id` | employer, work city | `workplace_data` |
+| `get_customer_profile` | `customer_id` | segment, branch, customer since, account types and opening dates, transaction count | none |
+| `list_customer_transactions` | `customer_id` | the customer's newest 50 transactions | `transaction_history` |
+| `get_transaction_details` | `transaction_id` | one transaction, no account or customer | none |
+| `get_statistics` | optional `branch` | counts by segment, branch, month (with volume), channel, anomaly pattern, AML status and risk, block reason | none |
 
-The two rules forbid one user from holding `aml_review` together with `contact_data` or `workplace_data` for the same customer.
+Four rules forbid one user from holding, for the same customer, `aml_review` together with `contact_data` (`aml_contact`) or `workplace_data` (`aml_workplace`), or `transaction_history` together with `contact_data` (`history_contact`) or `workplace_data` (`history_workplace`). The history rules exist because a customer's anomaly patterns hint at an AML review without the summary that would record one.
 
-**Things to try.** The stub model picks the tool whose name shares the most words with your message, and passes the first ID it sees (`CUST-…` or `AML-…`). A real model (the Ollama preset) also understands free-form wording and the `branch` filter.
+The anonymized tools leave out every join key that would let a user work around a rule. Transaction tools name no account or customer. The customer profile shows no account numbers, masked or not, and no block status, because the blocked-accounts listing maps those to reasons such as "AML investigation hold".
+
+A running stack keeps its existing rules file. To pick up `history_contact` and `history_workplace`, click *Restore defaults* in the dashboard's rules editor, or remove the `policy-rules` volume (`docker compose down` then `docker volume rm` it).
+
+**Things to try.** The stub model picks the tool whose name shares the most words with your message, and passes the first ID it sees (`CUST-…` or `AML-…`). A real model (the Ollama preset) also understands free-form wording and the filters, for example *"How many AML cases are high risk?"* or *"The five largest outgoing transfers in Krakow in September"*.
 
 - *"List AML cases"*, then *"Show me the AML case summary for AML-2026-0007"*. The summary names CUST-53. Then *"Give me the customer contact for CUST-53"* → refused (`aml_contact`), and *"Get the customer workplace for CUST-53"* → refused (`aml_workplace`).
-- *"List customers"*, *"Show me transaction anomalies"*, *"Show me blocked accounts"* → always answered. They are anonymized, so they record no facts.
+- *"List customers"*, *"Show me transaction anomalies"*, *"Show me blocked accounts"*, *"Show me recent transactions"*, *"Show me transaction details for TX-1001"*, *"Show me the customer profile for CUST-17"*, *"Show me bank statistics"* → always answered. They are anonymized, so they record no facts.
+- *"Show me customer transactions for CUST-53"*, then *"Give me the customer contact for CUST-53"* → refused (`history_contact`); the workplace is refused too (`history_workplace`).
 - *"Give me the customer contact for CUST-1"* → answered (CUST-1 has no AML case). After this, **every** AML summary is refused for this user, and that is intended. Before reading a case, the engine cannot know which customer it names. It refuses rather than look at private data to decide, so knowing any customer's contact blocks all AML summaries. Use another user, or reset knowledge (below), to keep exploring.
 - *"Give me the customer contact for CUST-999"* → a generic "Operation unavailable" failure, shown as *failed*, not *denied*. A missing record looks the same as any other error, so a reply never reveals whether a record exists.
 

@@ -38,6 +38,11 @@ async def test_lists_only_the_data_tools(server):
         "get_aml_case_summary",
         "get_customer_contact",
         "get_customer_workplace",
+        "list_transactions",
+        "get_customer_profile",
+        "list_customer_transactions",
+        "get_transaction_details",
+        "get_statistics",
     }
 
 
@@ -156,8 +161,13 @@ STUB_PROMPT_ROUTES = [
     ("Give me the customer contact for CUST-17", "get_customer_contact", {"customer_id": "CUST-17"}),
     ("Get the customer workplace for CUST-54", "get_customer_workplace", {"customer_id": "CUST-54"}),
     ("Show me transaction anomalies", "get_transaction_anomalies", {}),
-    ("Show me recent transactions", "get_transaction_anomalies", {}),
+    ("Show me recent transactions", "list_transactions", {}),
+    ("List transactions", "list_transactions", {}),
     ("Show me blocked accounts", "get_blocked_accounts", {}),
+    ("Show me the customer profile for CUST-53", "get_customer_profile", {"customer_id": "CUST-53"}),
+    ("Show me customer transactions for CUST-53", "list_customer_transactions", {"customer_id": "CUST-53"}),
+    ("Show me transaction details for TX-1001", "get_transaction_details", {"transaction_id": "TX-1001"}),
+    ("Show me bank statistics", "get_statistics", {}),
 ]
 
 
@@ -167,3 +177,101 @@ async def test_stub_model_routes_the_documented_prompts(server, prompt, expected
         tools = await session.list_tools()
     reply = await StubChatModel().complete([{"role": "user", "content": prompt}], tools)
     assert [(call.name, call.arguments) for call in reply.tool_calls] == [(expected_tool, expected_arguments)]
+
+
+async def test_filters_narrow_the_listings(server):
+    async with McpToolProvider(server).open_session() as session:
+        premium = await session.call_tool("list_customers", {"segment": "premium", "branch": "Warsaw"}, ALICE_CONTEXT)
+        structuring = await session.call_tool(
+            "get_transaction_anomalies",
+            {"pattern": "structuring", "date_from": "2026-09-01", "date_to": "2026-09-30"}, ALICE_CONTEXT)
+        high_risk = await session.call_tool("list_aml_cases", {"risk_level": "high"}, ALICE_CONTEXT)
+        largest = await session.call_tool(
+            "list_transactions", {"direction": "out", "min_amount_pln": 50000, "order_by": "largest"}, ALICE_CONTEXT)
+
+    assert {(row["segment"], row["branch"]) for row in json.loads(premium.content)} == {("premium", "Warsaw")}
+    structuring_rows = json.loads(structuring.content)
+    assert "TX-1001" in {row["id"] for row in structuring_rows}
+    assert {row["pattern"] for row in structuring_rows} == {"structuring"}
+    assert all("2026-09-01" <= row["date"] <= "2026-09-30" for row in structuring_rows)
+    assert {row["risk_level"] for row in json.loads(high_risk.content)} == {"high"}
+    amounts = [row["amount_pln"] for row in json.loads(largest.content)]
+    assert amounts and amounts == sorted(amounts, reverse=True) and min(amounts) >= 50000
+    assert {row["direction"] for row in json.loads(largest.content)} == {"out"}
+
+
+async def test_a_null_optional_filter_counts_as_left_out(server):
+    async with McpToolProvider(server).open_session() as session:
+        statistics = await session.call_tool("get_statistics", {"branch": None}, ALICE_CONTEXT)
+    assert statistics.outcome is ToolCallOutcome.PASSED and json.loads(statistics.content)["branch"] == "all"
+
+
+async def test_transaction_tools_name_no_account_or_customer(server):
+    async with McpToolProvider(server).open_session() as session:
+        details = await session.call_tool("get_transaction_details", {"transaction_id": "TX-1001"}, ALICE_CONTEXT)
+        listing = await session.call_tool("list_transactions", {"branch": "Warsaw"}, ALICE_CONTEXT)
+        contact_afterwards = await session.call_tool("get_customer_contact", CONTACT_ARGUMENTS, ALICE_CONTEXT)
+
+    detail_record = json.loads(details.content)
+    assert detail_record["pattern"] == "structuring"
+    for record in (detail_record, *json.loads(listing.content)):
+        assert not {"account", "account_number", "customer_id"} & record.keys()
+    assert not contact_afterwards.denied
+
+
+async def test_customer_profile_names_no_account_and_records_no_fact(server):
+    async with McpToolProvider(server).open_session() as session:
+        await session.call_tool("get_aml_case_summary", {}, ALICE_CONTEXT)
+        profile = await session.call_tool("get_customer_profile", CONTACT_ARGUMENTS, ALICE_CONTEXT)
+
+    assert not profile.denied
+    record = json.loads(profile.content)
+    assert record["customer_id"] == "CUST-17" and record["transaction_count"] >= 4
+    # Account numbers or block status would join to the blocked-accounts listing and its AML-related reasons.
+    assert all(set(account) == {"account_type", "opened_on"} for account in record["accounts"])
+    assert "4411" not in profile.content and "blocked" not in profile.content
+
+
+async def test_transaction_history_and_identity_cannot_be_combined(server):
+    async with McpToolProvider(server).open_session() as session:
+        history = await session.call_tool("list_customer_transactions", {"customer_id": "CUST-53"}, ALICE_CONTEXT)
+        contact = await session.call_tool("get_customer_contact", {"customer_id": "CUST-53"}, ALICE_CONTEXT)
+        workplace = await session.call_tool("get_customer_workplace", {"customer_id": "CUST-53"}, ALICE_CONTEXT)
+        other_contact = await session.call_tool("get_customer_contact", {"customer_id": "CUST-1"}, ALICE_CONTEXT)
+        bob_contact = await session.call_tool("get_customer_contact", {"customer_id": "CUST-2"}, BOB_CONTEXT)
+        bob_history = await session.call_tool("list_customer_transactions", {"customer_id": "CUST-2"}, BOB_CONTEXT)
+
+    assert not history.denied and json.loads(history.content)
+    assert contact.denied and "history_contact" in contact.content
+    assert workplace.denied and "history_workplace" in workplace.content
+    assert not other_contact.denied
+    assert bob_history.denied and "history_contact" in bob_history.content
+
+
+async def test_statistics_cover_the_whole_bank_or_one_branch(server):
+    async with McpToolProvider(server).open_session() as session:
+        bank = json.loads((await session.call_tool("get_statistics", {}, ALICE_CONTEXT)).content)
+        krakow = json.loads((await session.call_tool("get_statistics", {"branch": "Krakow"}, ALICE_CONTEXT)).content)
+
+    assert bank["branch"] == "all" and sum(bank["customers_by_branch"].values()) == 240
+    assert sum(bank["aml_cases_by_status"].values()) == 42
+    assert sum(bank["blocked_accounts_by_reason"].values()) == 20
+    assert krakow["customers_by_branch"].keys() == {"Krakow"}
+    assert sum(krakow["aml_cases_by_risk_level"].values()) < 42
+
+
+@pytest.mark.parametrize(("tool_name", "arguments"), [
+    ("list_transactions", {"min_amount_pln": -1}),
+    ("list_transactions", {"min_amount_pln": True}),
+    ("list_transactions", {"channel": "wire"}),
+    ("list_transactions", {"date_from": "2026-10-01", "date_to": "2026-09-01"}),
+    ("get_transaction_anomalies", {"date_from": "2026-02-30"}),
+    ("list_aml_cases", {"status": "pending"}),
+    ("get_transaction_details", {"transaction_id": "CUST-17"}),
+    ("get_transaction_details", {"transaction_id": "TX-99999999"}),
+    ("list_customer_transactions", {"customer_id": "CUST-99999"}),
+])
+async def test_bad_filters_and_unknown_records_fail_without_a_policy_denial(server, tool_name, arguments):
+    async with McpToolProvider(server).open_session() as session:
+        result = await session.call_tool(tool_name, arguments, ALICE_CONTEXT)
+    assert result.outcome is ToolCallOutcome.FAILED and result.checkpoint_steps == ()

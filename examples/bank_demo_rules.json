@@ -1,5 +1,5 @@
 {
-  "version": "bank-demo-v1",
+  "version": "bank-demo-v2",
   "rules": [
     {
       "rule_id": "aml_contact",
@@ -21,7 +21,7 @@
               "?u",
               "?customer",
               "aml_review",
-              "?status"
+              "?first"
             ]
           },
           {
@@ -30,7 +30,7 @@
               "?u",
               "?customer",
               "contact_data",
-              "?value"
+              "?second"
             ]
           }
         ]
@@ -56,7 +56,7 @@
               "?u",
               "?customer",
               "aml_review",
-              "?status"
+              "?first"
             ]
           },
           {
@@ -65,7 +65,77 @@
               "?u",
               "?customer",
               "workplace_data",
-              "?value"
+              "?second"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "rule_id": "history_contact",
+      "enabled": true,
+      "rule": {
+        "name": "history_contact",
+        "head": {
+          "predicate": "violation",
+          "terms": [
+            "?u",
+            "?customer",
+            "history_contact"
+          ]
+        },
+        "body": [
+          {
+            "predicate": "knows",
+            "terms": [
+              "?u",
+              "?customer",
+              "transaction_history",
+              "?first"
+            ]
+          },
+          {
+            "predicate": "knows",
+            "terms": [
+              "?u",
+              "?customer",
+              "contact_data",
+              "?second"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "rule_id": "history_workplace",
+      "enabled": true,
+      "rule": {
+        "name": "history_workplace",
+        "head": {
+          "predicate": "violation",
+          "terms": [
+            "?u",
+            "?customer",
+            "history_workplace"
+          ]
+        },
+        "body": [
+          {
+            "predicate": "knows",
+            "terms": [
+              "?u",
+              "?customer",
+              "transaction_history",
+              "?first"
+            ]
+          },
+          {
+            "predicate": "knows",
+            "terms": [
+              "?u",
+              "?customer",
+              "workplace_data",
+              "?second"
             ]
           }
         ]

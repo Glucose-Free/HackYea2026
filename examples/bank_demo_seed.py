@@ -21,6 +21,7 @@ from examples.bank_demo_db import BRANCHES, FEATURED_AML_CASE_ID, SCHEMA
 RANDOM_SEED = 2026
 AS_OF_DATE = date(2026, 10, 3)
 HISTORY_DAYS = 180
+HISTORY_START_DATE = AS_OF_DATE - timedelta(days=HISTORY_DAYS)
 CUSTOMER_COUNT = 240
 GENERATED_AML_CASE_COUNT = 41  # The featured case is AML-2026-0042, so the generated ones are 0001-0041.
 GENERATED_BLOCKED_ACCOUNT_COUNT = 18
@@ -137,6 +138,14 @@ SUSPICIOUS_INFLOWS = "suspicious inflows"
 COURT_ORDER = "court order"
 AML_BLOCK_REASONS = [SUSPICIOUS_INFLOWS, "AML investigation hold"]
 OTHER_BLOCK_REASONS = [COURT_ORDER, "bailiff seizure", "customer reported fraud", "identity verification pending"]
+
+# The value domains the data tools accept as filters; derived from the generator so the two cannot drift apart.
+SEGMENTS = tuple(SEGMENT_WEIGHTS)
+CHANNELS = (CHANNEL_CARD, CHANNEL_TRANSFER, CHANNEL_CASH, CHANNEL_BLIK)
+DIRECTIONS = (DIRECTION_IN, DIRECTION_OUT)
+ANOMALY_PATTERNS = tuple(anomaly.pattern for anomaly in ANOMALIES)
+AML_STATUSES = tuple(AML_STATUS_WEIGHTS)
+RISK_LEVELS = tuple(RISK_LEVEL_WEIGHTS)
 
 
 @dataclass(frozen=True)
@@ -309,7 +318,7 @@ def list_customer_accounts(customer: CustomerRow, taken_account_numbers: set[str
     account_types = [main_account_type] + [ACCOUNT_SAVINGS] * (rng.randint(*ACCOUNTS_PER_CUSTOMER) - 1)
     customer_since = date.fromisoformat(customer.customer_since)
     return [AccountRow(build_account_number(taken_account_numbers, rng), customer.customer_id, account_type,
-                       build_random_date(customer_since, AS_OF_DATE - timedelta(days=HISTORY_DAYS), rng).isoformat())
+                       build_random_date(customer_since, HISTORY_START_DATE, rng).isoformat())
             for account_type in account_types]
 
 
@@ -323,7 +332,6 @@ def build_account_number(taken_account_numbers: set[str], rng: random.Random) ->
 
 def list_generated_transactions(accounts: list[AccountRow], customer_by_id: dict[str, CustomerRow],
                                 aml_customer_ids: set[str], rng: random.Random) -> list[TransactionRow]:
-    history_start = AS_OF_DATE - timedelta(days=HISTORY_DAYS)
     unnumbered = []
     for account in accounts:
         customer = customer_by_id[account.customer_id]
@@ -331,7 +339,7 @@ def list_generated_transactions(accounts: list[AccountRow], customer_by_id: dict
             else REGULAR_CUSTOMER_ANOMALY_RATE
         activity = BUSINESS_ACTIVITY if account.account_type == ACCOUNT_BUSINESS else PERSONAL_ACTIVITY
         for _ in range(rng.randint(*TRANSACTIONS_PER_ACCOUNT)):
-            booked_on = build_random_date(history_start, AS_OF_DATE, rng)
+            booked_on = build_random_date(HISTORY_START_DATE, AS_OF_DATE, rng)
             anomaly = rng.choice(ANOMALIES) if rng.random() < anomaly_rate else None
             amount = anomaly.amount if anomaly else rng.choice(activity)
             unnumbered.append((booked_on, account, customer.branch, amount, anomaly.pattern if anomaly else None))
@@ -350,14 +358,13 @@ def block_generated_accounts(accounts: list[AccountRow], aml_customer_ids: set[s
                              rng: random.Random) -> list[AccountRow]:
     candidates = [account for account in accounts if account not in STORYLINE_ACCOUNTS]
     blocked_numbers = {account.account_number for account in rng.sample(candidates, GENERATED_BLOCKED_ACCOUNT_COUNT)}
-    history_start = AS_OF_DATE - timedelta(days=HISTORY_DAYS)
     blocked_accounts = []
     for account in accounts:
         if account.account_number not in blocked_numbers:
             blocked_accounts.append(account)
             continue
         reasons = AML_BLOCK_REASONS if account.customer_id in aml_customer_ids else OTHER_BLOCK_REASONS
-        blocked_on = build_random_date(history_start, AS_OF_DATE - timedelta(days=3), rng).isoformat()
+        blocked_on = build_random_date(HISTORY_START_DATE, AS_OF_DATE - timedelta(days=3), rng).isoformat()
         blocked_accounts.append(AccountRow(account.account_number, account.customer_id, account.account_type,
                                            account.opened_on, blocked_on, rng.choice(reasons)))
     return blocked_accounts
