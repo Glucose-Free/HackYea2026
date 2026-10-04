@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "updated_at": "2026-10-04T00:00:00Z",
+  "rules": [
+    {
+      "rule_id": "block_aml_contact",
+      "enabled": true,
+      "rule": {
+        "name": "block_aml_contact",
+        "head": {
+          "predicate": "decision",
+          "terms": ["block", "aml_contact"]
+        },
+        "body": [
+          {
+            "predicate": "knows",
+            "terms": ["?user", "aml_flag", "true"]
+          },
+          {
+            "predicate": "knows",
+            "terms": ["?user", "contact_data", "true"]
+          }
+        ]
+      }
+    },
+    {
+      "rule_id": "block_aml_workplace",
+      "enabled": true,
+      "rule": {
+        "name": "block_aml_workplace",
+        "head": {
+          "predicate": "decision",
+          "terms": ["block", "aml_workplace"]
+        },
+        "body": [
+          {
+            "predicate": "knows",
+            "terms": ["?user", "aml_flag", "true"]
+          },
+          {
+            "predicate": "knows",
+            "terms": ["?user", "workplace_data", "true"]
+          }
+        ]
+      }
+    }
+  ]
+}
