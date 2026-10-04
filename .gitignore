@@ -1,4 +1,7 @@
-﻿.venv/
+.venv/
 __pycache__/
+.pytest_cache/
+data/
+.env
 audit.jsonl
 selftest_last.json
