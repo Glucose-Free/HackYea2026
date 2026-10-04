@@ -1,0 +1,81 @@
+name: ai-control-layer
+
+x-gateway-env: &gateway-env
+  GATEWAY_API_KEY: ${GATEWAY_API_KEY:-demo-gateway-key}
+  REPORT_ACCESS_TOKEN: ${REPORT_ACCESS_TOKEN:-demo-report-token}
+  TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+  CHAT_MODEL_API_KEY: ${CHAT_MODEL_API_KEY:-}
+  GATEWAY_CONFIG_PATH: /data/config/gateway.toml
+  GATEWAY_CONFIG_HISTORY_DIR: /data/config/history
+  AUDIT_LOG_PATH: /data/audit/audit.jsonl
+
+services:
+  gateway:
+    build: .
+    environment: *gateway-env
+    # Seed the config volume on first start; later edits in the volume survive restarts.
+    command: >
+      sh -c "mkdir -p /data/config /data/audit &&
+             [ -f /data/config/gateway.toml ] || cp /app/config/gateway.toml /data/config/gateway.toml;
+             exec uvicorn gateway.app:create_app --factory --host 0.0.0.0 --port 8000"
+    volumes:
+      - gateway-data:/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      data-mcp:
+        condition: service_started
+
+  data-mcp:
+    # Replace with the real data MCP server image when it exists; only the MCP tool interface is assumed.
+    build: .
+    command: ["python", "deploy/stub_mcp/server.py"]
+    healthcheck:
+      disable: true
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    ports:
+      - "3000:8080"
+    environment:
+      OPENAI_API_BASE_URL: http://gateway:8000/v1
+      OPENAI_API_KEY: ${GATEWAY_API_KEY:-demo-gateway-key}
+      ENABLE_OLLAMA_API: "false"
+      ENABLE_FORWARD_USER_INFO_HEADERS: "true"
+      ENABLE_PERSISTENT_CONFIG: "false"
+      ENABLE_SIGNUP: "false"
+      WEBUI_ADMIN_EMAIL: ${WEBUI_ADMIN_EMAIL:-admin@demo.local}
+      WEBUI_ADMIN_PASSWORD: ${WEBUI_ADMIN_PASSWORD:-demo-admin-password}
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:-change-me}
+      # Background tasks would otherwise send extra prompts through checkpoint 1 and into the audit log.
+      ENABLE_TITLE_GENERATION: "false"
+      ENABLE_TAGS_GENERATION: "false"
+      ENABLE_FOLLOW_UP_GENERATION: "false"
+      ENABLE_AUTOCOMPLETE_GENERATION: "false"
+      ENABLE_RETRIEVAL_QUERY_GENERATION: "false"
+      ENABLE_SEARCH_QUERY_GENERATION: "false"
+      # No data path may bypass the gateway.
+      ENABLE_WEB_SEARCH: "false"
+      ENABLE_CODE_INTERPRETER: "false"
+      ENABLE_IMAGE_GENERATION: "false"
+    volumes:
+      - open-webui-data:/app/backend/data
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+  seed-users:
+    build: .
+    command: ["python", "deploy/open_webui/seed_users.py"]
+    environment:
+      OPEN_WEBUI_URL: http://open-webui:8080
+      WEBUI_ADMIN_EMAIL: ${WEBUI_ADMIN_EMAIL:-admin@demo.local}
+      WEBUI_ADMIN_PASSWORD: ${WEBUI_ADMIN_PASSWORD:-demo-admin-password}
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-demo-user-password}
+    depends_on:
+      - open-webui
+    restart: "no"
+
+volumes:
+  gateway-data:
+  open-webui-data:

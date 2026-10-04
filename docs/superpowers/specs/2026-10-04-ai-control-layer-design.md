@@ -392,8 +392,9 @@ the MCP server, so it counts as **one denied fetch attempt** with
 **Steps inside the black box.** The gateway only sees what the MCP server
 returns. To show which checkpoint-2 middleware denied a fetch, the gateway:
 
-- sends a W3C `traceparent` header on each MCP request, so the MCP server
-  can tie its own logs to our trace if it wants to;
+- sends a W3C `traceparent` in each MCP tool call's `_meta` (MCP has no
+  per-call headers), so the MCP server can tie its own logs to our trace
+  if it wants to;
 - reads optional structured steps from the tool result
   (`structuredContent` or `_meta`, field `checkpoint_steps`: a list of
   `{middleware, outcome, reason}`) and records each as a `fetch_step`.
