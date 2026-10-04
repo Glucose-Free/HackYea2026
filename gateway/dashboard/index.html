@@ -21,6 +21,7 @@
       <a class="nav-link" href="#requests" data-view="requests">Requests status</a>
       <a class="nav-link" href="#users" data-view="users">Users stats</a>
       <a class="nav-link" href="#retrievals" data-view="retrievals">Data retrievals</a>
+      <a class="nav-link" href="#policy" data-view="policy">Policy rules</a>
       <div class="sidebar-footer">
         <span id="refresh-status" class="muted"></span>
         <button id="sign-out" class="link-button" type="button">Sign out</button>
@@ -110,6 +111,49 @@
             <p id="retrieval-list-empty" class="muted empty" hidden>No requests in this range.</p>
             <button id="load-more-retrievals" class="secondary-button" type="button" hidden>Load more</button>
           </div>
+        </div>
+      </section>
+
+      <section id="view-policy" class="view" hidden>
+        <h1>Policy rules</h1>
+        <p class="view-intro">Checkpoint 2 refuses a data fetch when these Datalog rules derive a <code>violation</code> from what the user already knows plus what the fetch would reveal. Changes apply to the next fetch; what users already know is kept.</p>
+        <div id="policy-tiles" class="stat-tiles"></div>
+        <div class="card">
+          <div class="card-header">
+            <h2>Rules</h2>
+            <button id="restore-policy" class="link-button" type="button">Restore defaults</button>
+          </div>
+          <p id="policy-error" class="error policy-error" role="alert" hidden></p>
+          <ul id="policy-rule-list" class="rule-list"></ul>
+        </div>
+        <div class="card">
+          <h2>Add a blocking rule</h2>
+          <p class="card-hint">Refuse any fetch that would let one user know all of these relations about the same subject.</p>
+          <form id="policy-rule-form" class="filters rule-form">
+            <label class="filter">
+              <span class="filter-label">Rule id</span>
+              <input id="new-rule-id" required pattern="[a-z][a-z0-9_]*" placeholder="contact_workplace" autocomplete="off" title="Lowercase letters, digits and underscores">
+            </label>
+            <label class="filter">
+              <span class="filter-label">Relation</span>
+              <input class="new-rule-relation" list="known-relations" required placeholder="contact_data" autocomplete="off">
+            </label>
+            <label class="filter">
+              <span class="filter-label">and relation</span>
+              <input class="new-rule-relation" list="known-relations" required placeholder="workplace_data" autocomplete="off">
+            </label>
+            <label class="filter">
+              <span class="filter-label">and relation (optional)</span>
+              <input class="new-rule-relation" list="known-relations" autocomplete="off">
+            </label>
+            <button class="primary-button" type="submit">Add rule</button>
+          </form>
+          <datalist id="known-relations"></datalist>
+          <details id="policy-json" class="json-editor">
+            <summary>Edit all rules as JSON</summary>
+            <textarea id="policy-json-input" spellcheck="false" aria-label="Rules as JSON"></textarea>
+            <button id="save-policy-json" class="secondary-button" type="button">Save JSON</button>
+          </details>
         </div>
       </section>
     </main>

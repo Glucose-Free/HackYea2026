@@ -127,6 +127,7 @@ Open http://localhost:8000/dashboard/ and sign in with the report token (`REPORT
 - **Users stats:** every user with fetch attempts, sorted by denial share, with a per-hour breakdown of passed fetches and denials at each checkpoint, plus their recent requests. A red marker means at least 25% of a user's attempts were denied; yellow means some were.
 - **Requests status:** totals, audit-chain integrity, fetches over time, and a filterable request list. Click a request to see its full trace.
 - **Data retrievals:** a donut of requests by status. Click a slice (or its *Details* button) to list those requests, with user, time and the user's prompt; click the centre to list all of them. Click a request to see its trace. Statuses: *passed* (answered, nothing denied), *partially passed* (answered, but checkpoint 2 denied at least one fetch) and *blocked* (refused at checkpoint 1, or failed closed).
+- **Policy rules:** checkpoint 2's Datalog rules, each shown in Datalog notation with the relations it combines. Switch a rule off or on, delete it, add a blocking rule ("refuse when one user would know all of these relations about the same subject"), edit everything as JSON, or *Restore defaults*. A save goes through the engine's own validation, so an invalid policy is rejected with the reason (for example, every policy needs at least one enabled blocking rule). It applies to the next data fetch, with no restart. Each save gets a new policy version (`dashboard-<hash of the rules>`), which the engine records with every decision. Facts that users learned while a rule was off still count once it is back on.
 
 The page is static files served by the gateway (`gateway/dashboard/`) and reads only the API below. It refreshes every 15 seconds.
 
@@ -149,6 +150,9 @@ All endpoints except `/audit/verify` need the report token, sent as the `X-Repor
 | `GET /admin/requests?user_id&outcome&denied_at&status&start&end&cursor&limit` | paged request list, newest first; `status` is `passed`, `partially_passed` or `blocked` |
 | `GET /admin/requests/status-counts?start&end` | number of requests in each status |
 | `GET /admin/requests/{request_id}/trace` | the full step tree of one request |
+| `GET /admin/policy/rules` | checkpoint 2's rules, with the policy `version` and the file's `revision` |
+| `PUT /admin/policy/rules` | replace the rules; body `{revision, rules}`. 400 with the engine's reason if invalid, 409 if `revision` is stale |
+| `POST /admin/policy/rules/restore-defaults` | put back the shipped rules |
 | `GET /audit/verify` | hash-chain integrity (public) |
 
 A prompt refused at checkpoint 1 counts as one denied fetch attempt (`denied_at = checkpoint_1`). If the MCP server returns `checkpoint_steps` (a list of `{middleware, outcome, reason}`) in a tool result's `structuredContent` or `_meta`, those steps appear in the trace.
@@ -160,7 +164,8 @@ A prompt refused at checkpoint 1 counts as one denied fetch attempt (`denied_at 
 The `data-mcp` service (`python -m deploy.policy_mcp.server`) serves it over streamable HTTP:
 
 - `mcp_policy_http_server.py` reads the user from each call's `_meta` and denies calls without one. A policy denial returns `checkpoint_steps`, so the dashboard trace ends at the `datalog_policy` step.
-- `examples/bank_demo.py` defines the seven data tools and their disclosure plans. `examples/bank_demo_db.py` holds the schema and the read-only queries, and `examples/bank_demo_seed.py` generates the data. `examples/bank_demo_rules.json` holds the rules (`aml_contact`, `aml_workplace`).
+- `examples/bank_demo.py` defines the seven data tools and their disclosure plans. `examples/bank_demo_db.py` holds the schema and the read-only queries, and `examples/bank_demo_seed.py` generates the data. `examples/bank_demo_rules.json` holds the default rules (`aml_contact`, `aml_workplace`).
+- The live rules are `/data/rules/policy_rules.json` on the `policy-rules` volume, shared by `data-mcp` (which reads it on every tool call and seeds it from the defaults on first start) and the gateway (which edits it for the dashboard).
 - The server trusts the user id the gateway sends, so it sits on an internal `backend` network with only the gateway; its port is not published.
 - Planning cannot know which customer an AML case names before reading it. A user who already knows *any* customer's contact is therefore refused every AML summary. The engine over-blocks rather than look at private data before deciding.
 
@@ -179,5 +184,6 @@ uv run pytest                                         # locally, with uv
 - **Forged history:** the client sends the whole conversation, so earlier turns can be fabricated.
 - **No output check:** the system relies on checkpoint 2 to decide what data may leave the DB.
 - **Header identity:** trust rests on the shared API key and network isolation, not SSO.
+- **One dashboard token:** the report token that reads the audit also edits checkpoint 2's rules. A real deployment would split viewing from policy administration.
 
 Design: `docs/superpowers/specs/2026-10-04-ai-control-layer-design.md`.

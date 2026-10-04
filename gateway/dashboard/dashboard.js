@@ -5,18 +5,30 @@ const API_PATHS = {
   requestStatusCounts: "/admin/requests/status-counts",
   requestTrace: (requestId) => `/admin/requests/${encodeURIComponent(requestId)}/trace`,
   auditVerify: "/audit/verify",
+  policyRules: "/admin/policy/rules",
+  restorePolicyRules: "/admin/policy/rules/restore-defaults",
 };
 const ELEMENT_IDS = {
   closeTrace: "close-trace",
   loadMoreRequests: "load-more-requests",
   loadMoreRetrievals: "load-more-retrievals",
+  knownRelations: "known-relations",
+  newRuleId: "new-rule-id",
+  policyError: "policy-error",
+  policyJson: "policy-json",
+  policyJsonInput: "policy-json-input",
+  policyRuleForm: "policy-rule-form",
+  policyRuleList: "policy-rule-list",
+  policyTiles: "policy-tiles",
   refreshStatus: "refresh-status",
   requestTable: "request-table",
+  restorePolicy: "restore-policy",
   requestUserFilter: "request-user-filter",
   retrievalList: "retrieval-list",
   retrievalListEmpty: "retrieval-list-empty",
   retrievalListTitle: "retrieval-list-title",
   retrievalRange: "retrieval-range",
+  savePolicyJson: "save-policy-json",
   signIn: "sign-in",
   signInError: "sign-in-error",
   signInForm: "sign-in-form",
@@ -33,6 +45,7 @@ const ELEMENT_IDS = {
   userListEmpty: "user-list-empty",
   userSearch: "user-search",
   userSort: "user-sort",
+  viewPolicy: "view-policy",
   viewRequests: "view-requests",
   viewRetrievals: "view-retrievals",
   viewUsers: "view-users",
@@ -40,12 +53,16 @@ const ELEMENT_IDS = {
 const REPORT_TOKEN_HEADER = "X-Report-Token";
 const REPORT_TOKEN_STORAGE_KEY = "aware.reportToken";
 const HTTP_UNAUTHORIZED = 401;
+const HTTP_CONFLICT = 409;
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 
 const VIEW_USERS = "users";
 const VIEW_REQUESTS = "requests";
 const VIEW_RETRIEVALS = "retrievals";
-const VIEW_SECTION_IDS = { [VIEW_USERS]: ELEMENT_IDS.viewUsers, [VIEW_REQUESTS]: ELEMENT_IDS.viewRequests, [VIEW_RETRIEVALS]: ELEMENT_IDS.viewRetrievals };
+const VIEW_POLICY = "policy";
+const VIEW_SECTION_IDS = {
+  [VIEW_USERS]: ELEMENT_IDS.viewUsers, [VIEW_REQUESTS]: ELEMENT_IDS.viewRequests, [VIEW_RETRIEVALS]: ELEMENT_IDS.viewRetrievals, [VIEW_POLICY]: ELEMENT_IDS.viewPolicy,
+};
 const DEFAULT_VIEW = VIEW_USERS;
 const AUTO_REFRESH_MILLISECONDS = 15000;
 const REQUEST_PAGE_SIZE = 25;
@@ -180,6 +197,37 @@ const ACTIVATION_KEYS = new Set(["Enter", " "]);
 const DONUT_FOCUS_KEY_ATTRIBUTE = "data-focus-key";
 const DONUT_CENTER_FOCUS_KEY = "center";
 
+const VIOLATION_PREDICATE = "violation";
+const KNOWS_PREDICATE = "knows";
+const RECIPIENT_VARIABLE = "?u";
+const NEW_RULE_SUBJECT_VARIABLE = "?s";
+const NEW_RULE_VALUE_VARIABLE_PREFIX = "?v";
+const VARIABLE_PREFIX = "?";
+// Constants that need no quoting in Datalog notation.
+const PLAIN_DATALOG_CONSTANT = /^[a-z][a-z0-9_]*$/;
+const KNOWS_RELATION_TERM_INDEX = 2;
+const JSON_INDENT = 2;
+const RULE_KIND_BADGES = {
+  blocking: { className: BADGE_CLASSES.critical, label: "blocks" },
+  derivation: { className: BADGE_CLASSES.neutral, label: "derives knowledge" },
+};
+const POLICY_TEXT = {
+  version: "Policy version",
+  revision: "revision ",
+  rules: "Rules",
+  blockingAndDerived: (blocking, derived) => `${blocking} blocking · ${derived} derived`,
+  enabledBlocking: "Enabled blocking rules",
+  ofBlocking: (total) => `of ${total} blocking`,
+  enabled: "Enabled",
+  deleteRule: "Delete",
+  combines: "Combines",
+  confirmDelete: (ruleId) => `Delete rule ${ruleId}? Restore defaults brings back the shipped rules.`,
+  confirmRestore: "Replace all rules with the shipped defaults?",
+  invalidJson: "That is not valid JSON: ",
+  notAList: "The JSON must be a list of rules.",
+  staleRevision: "Someone else changed the rules in the meantime; the list now shows their version. Make your change again.",
+};
+
 const state = {
   view: DEFAULT_VIEW,
   timeRangeId: DEFAULT_TIME_RANGE_ID,
@@ -200,9 +248,19 @@ const state = {
   // Used only when sessionStorage is blocked.
   fallbackToken: "",
   dataTableOpen: false,
+  // The last rules document from the server; edits are sent against its revision.
+  policy: null,
 };
 
 class UnauthorizedError extends Error {}
+
+// A request the server understood and refused (400 invalid policy, 409 stale revision); `message` is its reason.
+class ApiError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
 
 // ---------- API ----------
 
@@ -235,6 +293,26 @@ async function fetchJson(path, parameters = {}) {
   return response.json();
 }
 
+async function sendJson(method, path, body) {
+  const response = await fetch(new URL(path, window.location.origin), {
+    method,
+    headers: { [REPORT_TOKEN_HEADER]: getStoredToken(), "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (response.status === HTTP_UNAUTHORIZED) throw new UnauthorizedError();
+  if (!response.ok) throw new ApiError(response.status, await getErrorDetail(response));
+  return response.json();
+}
+
+async function getErrorDetail(response) {
+  const text = await response.text();
+  try {
+    return JSON.parse(text).detail ?? text;
+  } catch {
+    return text;
+  }
+}
+
 function fetchUserFetchStats(queryWindow) {
   return fetchJson(API_PATHS.userFetchStats, { start: queryWindow.start, end: queryWindow.end });
 }
@@ -255,6 +333,18 @@ function fetchRequestStatusCounts(queryWindow) {
 
 function fetchRequestTrace(requestId) {
   return fetchJson(API_PATHS.requestTrace(requestId));
+}
+
+function fetchPolicyRules() {
+  return fetchJson(API_PATHS.policyRules);
+}
+
+function savePolicyRules(rules, revision) {
+  return sendJson("PUT", API_PATHS.policyRules, { revision, rules });
+}
+
+function restorePolicyRules() {
+  return sendJson("POST", API_PATHS.restorePolicyRules);
 }
 
 function fetchAuditChain() {
@@ -973,9 +1063,206 @@ function closeTracePanel() {
   document.getElementById(ELEMENT_IDS.tracePanel).hidden = true;
 }
 
+// ---------- Policy view ----------
+
+function isBlockingRule(policyRule) {
+  return policyRule.rule.head.predicate === VIOLATION_PREDICATE;
+}
+
+function formatDatalogTerm(term) {
+  if (term.startsWith(VARIABLE_PREFIX)) {
+    const name = term.slice(VARIABLE_PREFIX.length);
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  }
+  return PLAIN_DATALOG_CONSTANT.test(term) ? term : `'${term.replaceAll("'", "\\'")}'`;
+}
+
+function formatDatalogAtom(atom) {
+  return `${atom.predicate}(${atom.terms.map(formatDatalogTerm).join(", ")})`;
+}
+
+function formatDatalogRule(rule) {
+  return `${formatDatalogAtom(rule.head)} :-\n    ${rule.body.map(formatDatalogAtom).join(",\n    ")}.`;
+}
+
+function getRuleRelations(rule) {
+  return rule.body
+    .filter((atom) => atom.predicate === KNOWS_PREDICATE)
+    .map((atom) => atom.terms[KNOWS_RELATION_TERM_INDEX])
+    .filter((relation) => relation && !relation.startsWith(VARIABLE_PREFIX));
+}
+
+function getKnownRelations(policyRules) {
+  return [...new Set(policyRules.flatMap((policyRule) => getRuleRelations(policyRule.rule)))].sort();
+}
+
+function buildBlockingRule(ruleId, relations) {
+  const body = relations.map((relation, index) => ({
+    predicate: KNOWS_PREDICATE, terms: [RECIPIENT_VARIABLE, NEW_RULE_SUBJECT_VARIABLE, relation, `${NEW_RULE_VALUE_VARIABLE_PREFIX}${index + 1}`],
+  }));
+  // The rule id doubles as the violation's reason, so denials and traces name the rule that fired.
+  return {
+    rule_id: ruleId, enabled: true,
+    rule: { name: ruleId, head: { predicate: VIOLATION_PREDICATE, terms: [RECIPIENT_VARIABLE, NEW_RULE_SUBJECT_VARIABLE, ruleId] }, body },
+  };
+}
+
+function buildPolicyTile(label, value, detail, valueClassName) {
+  return createElement("div", { className: "stat-tile" }, [
+    createElement("div", { className: "stat-label", text: label }),
+    createElement("div", { className: valueClassName ? `stat-value ${valueClassName}` : "stat-value", text: String(value) }),
+    createElement("div", { className: "stat-detail", text: detail }),
+  ]);
+}
+
+function renderPolicyTiles(policy) {
+  const blockingRules = policy.rules.filter(isBlockingRule);
+  const enabledBlockingCount = blockingRules.filter((policyRule) => policyRule.enabled).length;
+  document.getElementById(ELEMENT_IDS.policyTiles).replaceChildren(
+    buildPolicyTile(POLICY_TEXT.version, policy.version, `${POLICY_TEXT.revision}${policy.revision}`, "stat-value-text"),
+    buildPolicyTile(POLICY_TEXT.rules, policy.rules.length, POLICY_TEXT.blockingAndDerived(blockingRules.length, policy.rules.length - blockingRules.length)),
+    buildPolicyTile(POLICY_TEXT.enabledBlocking, enabledBlockingCount, POLICY_TEXT.ofBlocking(blockingRules.length)),
+  );
+}
+
+function buildRuleToggle(policyRule) {
+  const checkbox = createElement("input", { attributes: { type: "checkbox", role: "switch" } });
+  checkbox.checked = policyRule.enabled;
+  checkbox.addEventListener("change", () => {
+    runPolicyEdit((rules) => rules.map((rule) => (rule.rule_id === policyRule.rule_id ? { ...rule, enabled: checkbox.checked } : rule)));
+  });
+  return createElement("label", { className: "switch" }, [checkbox, createElement("span", { className: "switch-track", attributes: { "aria-hidden": "true" } }), createElement("span", { text: POLICY_TEXT.enabled })]);
+}
+
+function buildRuleDeleteButton(policyRule) {
+  const button = createElement("button", { className: "link-button", text: POLICY_TEXT.deleteRule, attributes: { type: "button" } });
+  button.addEventListener("click", () => {
+    if (!window.confirm(POLICY_TEXT.confirmDelete(policyRule.rule_id))) return;
+    runPolicyEdit((rules) => rules.filter((rule) => rule.rule_id !== policyRule.rule_id));
+  });
+  return button;
+}
+
+function buildRuleItem(policyRule) {
+  const blocking = isBlockingRule(policyRule);
+  const markerClass = policyRule.enabled ? (blocking ? "status-critical" : "status-good") : "status-disabled";
+  const relations = getRuleRelations(policyRule.rule);
+  const header = createElement("div", { className: "rule-header" }, [
+    createElement("span", { className: `status-marker ${markerClass}` }),
+    createElement("span", { className: "rule-name", text: policyRule.rule_id }),
+    buildBadge(RULE_KIND_BADGES[blocking ? "blocking" : "derivation"]),
+    createElement("span", { className: "rule-actions" }, [buildRuleToggle(policyRule), buildRuleDeleteButton(policyRule)]),
+  ]);
+  const relationChips = relations.length === 0 ? null : createElement("div", { className: "rule-relations" }, [
+    createElement("span", { className: "rule-relations-label", text: POLICY_TEXT.combines }),
+    ...relations.map((relation) => createElement("span", { className: "chip", text: relation })),
+  ]);
+  return createElement("li", { className: policyRule.enabled ? "rule-item" : "rule-item disabled" }, [
+    header, relationChips, createElement("pre", { className: "datalog", text: formatDatalogRule(policyRule.rule) }),
+  ]);
+}
+
+function renderKnownRelations(policy) {
+  document.getElementById(ELEMENT_IDS.knownRelations).replaceChildren(
+    ...getKnownRelations(policy.rules).map((relation) => createElement("option", { attributes: { value: relation } })),
+  );
+}
+
+function fillPolicyJsonEditor() {
+  document.getElementById(ELEMENT_IDS.policyJsonInput).value = JSON.stringify(state.policy.rules, null, JSON_INDENT);
+}
+
+function renderPolicy(policy) {
+  state.policy = policy;
+  renderPolicyTiles(policy);
+  document.getElementById(ELEMENT_IDS.policyRuleList).replaceChildren(...policy.rules.map(buildRuleItem));
+  renderKnownRelations(policy);
+}
+
+function showPolicyError(message) {
+  const errorElement = document.getElementById(ELEMENT_IDS.policyError);
+  errorElement.textContent = message;
+  errorElement.hidden = !message;
+}
+
+async function loadPolicyView() {
+  const policy = await fetchPolicyRules();
+  // Re-rendering an unchanged list on every auto-refresh would steal keyboard focus from the toggles.
+  if (state.policy && state.policy.revision === policy.revision) return;
+  renderPolicy(policy);
+}
+
+async function applyPolicyChange(sendChange) {
+  showPolicyError("");
+  try {
+    renderPolicy(await sendChange());
+    return true;
+  } catch (error) {
+    if (!(error instanceof ApiError)) throw error;
+    if (error.status === HTTP_CONFLICT) {
+      renderPolicy(await fetchPolicyRules());
+      showPolicyError(POLICY_TEXT.staleRevision);
+    } else {
+      // A rejected change leaves the file as it was; re-render so toggles snap back to the saved state.
+      renderPolicy(state.policy);
+      showPolicyError(error.message);
+    }
+    return false;
+  }
+}
+
+function runPolicyEdit(editRules) {
+  return runAndReportErrors(() => applyPolicyChange(() => savePolicyRules(editRules(state.policy.rules), state.policy.revision)));
+}
+
+function addRuleFromForm(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const ruleId = document.getElementById(ELEMENT_IDS.newRuleId).value.trim();
+  const relations = [...form.querySelectorAll(".new-rule-relation")].map((input) => input.value.trim()).filter(Boolean);
+  runAndReportErrors(async () => {
+    const saved = await applyPolicyChange(() => savePolicyRules([...state.policy.rules, buildBlockingRule(ruleId, relations)], state.policy.revision));
+    if (saved) form.reset();
+  });
+}
+
+function savePolicyJson() {
+  let rules;
+  try {
+    rules = JSON.parse(document.getElementById(ELEMENT_IDS.policyJsonInput).value);
+  } catch (error) {
+    showPolicyError(`${POLICY_TEXT.invalidJson}${error.message}`);
+    return;
+  }
+  if (!Array.isArray(rules)) {
+    showPolicyError(POLICY_TEXT.notAList);
+    return;
+  }
+  runAndReportErrors(async () => {
+    if (await applyPolicyChange(() => savePolicyRules(rules, state.policy.revision))) fillPolicyJsonEditor();
+  });
+}
+
+function restoreDefaultPolicy() {
+  if (!window.confirm(POLICY_TEXT.confirmRestore)) return;
+  runAndReportErrors(async () => {
+    if (await applyPolicyChange(restorePolicyRules)) fillPolicyJsonEditor();
+  });
+}
+
+function bindPolicyControls() {
+  document.getElementById(ELEMENT_IDS.policyRuleForm).addEventListener("submit", addRuleFromForm);
+  document.getElementById(ELEMENT_IDS.savePolicyJson).addEventListener("click", savePolicyJson);
+  document.getElementById(ELEMENT_IDS.restorePolicy).addEventListener("click", restoreDefaultPolicy);
+  // Filled on opening, not on refresh, so an auto-refresh never overwrites an edit in progress.
+  document.getElementById(ELEMENT_IDS.policyJson).addEventListener("toggle", (event) => {
+    if (event.currentTarget.open && state.policy) fillPolicyJsonEditor();
+  });
+}
+
 // ---------- Navigation, auth, refresh ----------
 
-const VIEW_LOADERS = { [VIEW_USERS]: loadUsersView, [VIEW_REQUESTS]: loadRequestsView, [VIEW_RETRIEVALS]: loadRetrievalsView };
+const VIEW_LOADERS = { [VIEW_USERS]: loadUsersView, [VIEW_REQUESTS]: loadRequestsView, [VIEW_RETRIEVALS]: loadRetrievalsView, [VIEW_POLICY]: loadPolicyView };
 
 function getViewFromLocation() {
   const view = window.location.hash.replace("#", "");
@@ -1082,6 +1369,7 @@ function bindChrome() {
 
 function start() {
   bindFilters();
+  bindPolicyControls();
   bindChrome();
   showView(getViewFromLocation());
   if (getStoredToken()) refreshCurrentView();

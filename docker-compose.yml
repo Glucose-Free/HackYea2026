@@ -1,5 +1,9 @@
 name: ai-control-layer
 
+# Checkpoint 2's rules, edited from the dashboard (gateway) and reloaded on every tool call (data-mcp).
+# A volume, not the repo: saves replace the file, and would leave a root-owned copy in the working tree.
+x-policy-rules-path: &policy-rules-path /data/rules/policy_rules.json
+
 x-gateway-env: &gateway-env
   GATEWAY_API_KEY: ${GATEWAY_API_KEY:-demo-gateway-key}
   REPORT_ACCESS_TOKEN: ${REPORT_ACCESS_TOKEN:-demo-report-token}
@@ -10,6 +14,7 @@ x-gateway-env: &gateway-env
   AUDIT_LOG_PATH: /data/audit/audit.jsonl
   # A separate volume, so replacing or truncating the log file alone is caught by /audit/verify.
   AUDIT_ANCHOR_PATH: /data/anchor/audit.anchor.json
+  POLICY_RULES_PATH: *policy-rules-path
 
 services:
   gateway:
@@ -18,6 +23,7 @@ services:
     volumes:
       - gateway-data:/data
       - audit-anchor:/data/anchor
+      - policy-rules:/data/rules
       # The repo's config directory, not a copy: editing config/gateway.toml reloads the running guards.
       # A directory mount, because the config store replaces the file atomically.
       - ./config:/app/config
@@ -35,8 +41,10 @@ services:
     command: ["python", "-m", "deploy.policy_mcp.server"]
     environment:
       POLICY_DB_PATH: /data/policy/knowledge.sqlite3
+      POLICY_RULES_PATH: *policy-rules-path
     volumes:
       - policy-data:/data/policy
+      - policy-rules:/data/rules
     networks: [backend]
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8001), 2)"]
@@ -103,5 +111,6 @@ networks:
 volumes:
   gateway-data:
   policy-data:
+  policy-rules:
   audit-anchor:
   open-webui-data:

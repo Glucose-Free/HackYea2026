@@ -38,7 +38,7 @@ List **only data-returning tools**. These names are what the Datalog fact infere
 - **Do not list** `evaluate_request`, `snapshot_session`, `list_policy_rules`, `set_policy_rule_enabled`, `upsert_policy_rule` or `reload_policy_rules` on this server.
   - A prompt-injected model could call `set_policy_rule_enabled` and switch the inference rules off.
   - The policy check belongs *inside* each data tool, before it runs its SQL.
-  - Rule management belongs on an admin path. The gateway will expose it through its dashboard admin API, the same place guard config lives. Keep `PolicyConfigStore` and `PolicyMiddleware` importable for that.
+  - Rule management belongs on an admin path. The gateway exposes it through its dashboard admin API (`/admin/policy/rules`), editing the rules file both services share.
 
 ## 3. Caller identity: read from `_meta`
 

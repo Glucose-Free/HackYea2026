@@ -37,15 +37,23 @@ def build_policy_data_server(db_path: str, bank_db_path: str = DEFAULT_BANK_DB_P
     return PolicyHttpMCPServer(middleware, bank_demo.build_executor(bank_db_path), scope)
 
 
+def ensure_policy_rules(rules_path: str) -> None:
+    """Seeds the editable rules file from the shipped defaults; an existing file, edited or not, is kept."""
+    default_version, default_rules = PolicyConfigStore(BANK_DEMO_RULES_PATH).load()
+    PolicyConfigStore(rules_path).initialize(list(default_rules), default_version)
+
+
 def main() -> None:
     db_path = os.environ.get(DB_PATH_ENV, DEFAULT_DB_PATH)
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     bank_db_path = os.environ.get(BANK_DB_PATH_ENV, DEFAULT_BANK_DB_PATH)
     ensure_bank_demo_database(bank_db_path)
+    rules_path = os.environ.get(RULES_PATH_ENV, BANK_DEMO_RULES_PATH)
+    ensure_policy_rules(rules_path)
     server = build_policy_data_server(
         db_path,
         bank_db_path=bank_db_path,
-        rules_path=os.environ.get(RULES_PATH_ENV, BANK_DEMO_RULES_PATH),
+        rules_path=rules_path,
         tenant_id=os.environ.get(TENANT_ID_ENV, DEFAULT_TENANT_ID),
         dataset_id=os.environ.get(DATASET_ID_ENV, DEFAULT_DATASET_ID),
     )

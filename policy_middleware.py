@@ -290,6 +290,20 @@ class DatalogProgram:
         return Inference(frozenset(proofs), proofs)
 
 
+def parse_policy_payload(payload: Any, max_rules: int = 512) -> tuple[str, tuple[PolicyRuleConfig, ...]]:
+    """Validates a policy document; the specific PolicyError is for a trusted administrator, never the model."""
+    _exact_fields(payload, {"version", "rules"})
+    version = _text(payload["version"], "policy version")
+    if not isinstance(payload["rules"], list) or not 1 <= len(payload["rules"]) <= max_rules:
+        raise PolicyError("Invalid number of rules")
+    rules = tuple(PolicyRuleConfig.from_dict(item) for item in payload["rules"])
+    if len({r.rule_id for r in rules}) != len(rules):
+        raise PolicyError("Duplicate rule IDs")
+    if not any(r.enabled and r.rule.head.predicate == "violation" for r in rules):
+        raise PolicyError("An enabled blocking rule is required")
+    return version, rules
+
+
 class PolicyConfigStore:
     """No automatic creation or silent defaults; bootstrap is an explicit trusted action."""
     def __init__(self, path: str = DEFAULT_RULES_PATH, *, max_rules: int = 512):
@@ -300,17 +314,7 @@ class PolicyConfigStore:
 
     def load(self) -> tuple[str, tuple[PolicyRuleConfig, ...]]:
         try:
-            payload = json.loads(self.path.read_text(encoding="utf-8"))
-            _exact_fields(payload, {"version", "rules"})
-            version = _text(payload["version"], "policy version")
-            if not isinstance(payload["rules"], list) or not 1 <= len(payload["rules"]) <= self.max_rules:
-                raise PolicyError("Invalid number of rules")
-            rules = tuple(PolicyRuleConfig.from_dict(item) for item in payload["rules"])
-            if len({r.rule_id for r in rules}) != len(rules):
-                raise PolicyError("Duplicate rule IDs")
-            if not any(r.enabled and r.rule.head.predicate == "violation" for r in rules):
-                raise PolicyError("An enabled blocking rule is required")
-            return version, rules
+            return parse_policy_payload(json.loads(self.path.read_text(encoding="utf-8")), self.max_rules)
         except (OSError, ValueError, TypeError, KeyError) as error:
             raise PolicyError("Invalid or missing policy configuration") from error
 
