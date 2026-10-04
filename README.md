@@ -58,7 +58,7 @@ To use a GPU, see Ollama's Docker instructions and add the GPU device to the `ol
 
 1. `cp .env.example .env` and fill in `TYPESAFE_API_KEY` and/or `CHAT_MODEL_API_KEY`.
 2. In `config/gateway.toml` set `[jev] adapter = "typesafe"` and/or `[chat_model] adapter = "openai_compatible"` with a `base_url` and `model`. Any OpenAI-compatible API with tool calling works.
-3. To put the policy engine in front of real data, replace `demo_executor` in `examples/bank_demo.py` with read-only queries, or point `[data_mcp] url` at another server that follows `docs/contracts/data-mcp-server.md`.
+3. To put the policy engine in front of real data, replace `build_executor` in `examples/bank_demo.py` with read-only queries, or point `[data_mcp] url` at another server that follows `docs/contracts/data-mcp-server.md`.
 
 Adapters are read at startup. Guard pipelines (`[[user_input.guards]]`) reload as soon as the config file changes. An invalid edit is rejected and the last working pipelines stay active.
 
@@ -122,7 +122,7 @@ A prompt refused at checkpoint 1 counts as one denied fetch attempt (`denied_at 
 The `data-mcp` service (`python -m deploy.policy_mcp.server`) serves it over streamable HTTP:
 
 - `mcp_policy_http_server.py` reads the user from each call's `_meta` and denies calls without one. A policy denial returns `checkpoint_steps`, so the dashboard trace ends at the `datalog_policy` step.
-- `examples/bank_demo.py` defines the five data tools, their disclosure plans and the fake data. `examples/bank_demo_rules.json` holds the rules (`aml_contact`, `aml_workplace`).
+- `examples/bank_demo.py` defines the five data tools and their disclosure plans; the records it serves are seeded from `examples/bank_demo_seed.sql` into a SQLite database and read back read-only. `examples/bank_demo_rules.json` holds the rules (`aml_contact`, `aml_workplace`).
 - The server trusts the user id the gateway sends, so it sits on an internal `backend` network with only the gateway; its port is not published.
 - Planning cannot know which customer an AML case names before reading it. A user who already knows *any* customer's contact is therefore refused every AML summary. The engine over-blocks rather than look at private data before deciding.
 
