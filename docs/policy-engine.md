@@ -1,8 +1,10 @@
-# Control Layer: reguły relacyjne i kontrola ujawnień
+# Silnik polityki (checkpoint 2)
 
-Python 3.12, biblioteka standardowa. Rdzeń i serwer MCP są niezależne od domeny.
-AML jest jednym z opcjonalnych przykładów. Drugi przykład chroni przed poznaniem
-obu stron tej samej transakcji. Oba korzystają z tego samego middleware i MCP.
+Python 3.12. Rdzeń (`middleware.py`) i serwer stdio korzystają tylko z biblioteki
+standardowej, serwer HTTP z SDK `mcp`. Żaden z nich nie zna domeny.
+Demo korzysta z domeny banku (`examples/bank_demo.py`); `examples/aml.py`
+i `examples/transactions.py` to mniejsze domeny, które pokazują, że jeden silnik
+obsługuje kilka katalogów narzędzi naraz.
 
 ## Podział odpowiedzialności
 
@@ -186,21 +188,11 @@ odrzucane. ID audytu jest osobnym UUID. Zwykłe wydruki z executora i fabryki s�
 wyciszane, aby nie obchodziły kontroli. Zaufany backend nie może pisać bezpośrednio
 do deskryptora stdout ani logować prywatnych wyników do strumieni klienta.
 
-## Granice i migracja
+## Ograniczenia
 
 - Historia jest wspólna dla sesji tego samego odbiorcy. Jej zakres wynika
   z organizacji, użytkownika i jawnego, stabilnego dataset ID. Dodanie domeny,
   reguły lub nowego połączenia nie uzasadnia zmiany dataset ID ani nowej pustej bazy.
-- `TrustedPrincipal` wymaga teraz jawnych `role` i `dataset_id`. Przy aktualizacji
-  istniejącego demo AML zachowaj `dataset_id="bank-demo-v1"`, dotychczasowego
-  odbiorcę i plik SQLite. Dzięki temu istniejąca historia pozostaje skuteczna.
-- Usunięto domyślny adapter z `PolicyMiddleware`; wymagany jest trzeci argument
-  `registry`. Helper `initialize_demo` znajduje się w danym module przykładów.
-  Fabryka MCP zwraca teraz trzy elementy zamiast dwóch. Flaga `--demo` została
-  zastąpiona uruchamianiem wybranego modułu przykładów lub jawnej fabryki.
-- Schemat SQLite i fakty zatwierdzone przez poprzednią poprawioną wersję pozostają
-  kompatybilne. Bardzo stare tabele `requests`/`knowledge_facts` powodują
-  `LegacyDatabaseError`; odtwórz historię z wiarygodnych wydań danych, nie resetuj jej.
 - Reguły wielu domen działają nad tą samą historią w danym zakresie. Wartości
   relacji i identyfikatory muszą być spójne. Zmiana ich znaczenia wymaga migracji
   historycznych faktów, a nie nadania nowej etykiety w celu obejścia kontroli.
@@ -232,15 +224,8 @@ do deskryptora stdout ani logować prywatnych wyników do strumieni klienta.
 uv run pytest tests/policy_engine
 ```
 
-92 testy: regresje wcześniejszego middleware/MCP i 20 testów rozszerzalności.
-Obejmują dwa adaptery, ich wspólne użycie, role per narzędzie, reguły dodane bez
-zmiany adapterów, nieznane wartości/podmioty, pokrycie planu, limity, cache i
-historię po restarcie. Oba przykłady są sprawdzane przez rzeczywisty subprocess
-MCP. Test 150 niezależnych reguł przechodzi przy budżecie 500 dopasowań;
-nie jest to benchmark wydajności produkcyjnej.
-
-Dokumentacja protokołu wykorzystana przy implementacji transportu:
-
-- https://modelcontextprotocol.io/specification/2025-11-25/basic/transports
-- https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle
-- https://modelcontextprotocol.io/specification/2025-11-25/server/tools
+Testy silnika obejmują dwa adaptery i ich wspólne użycie, role per narzędzie,
+reguły dodane bez zmiany adapterów, nieznane wartości i podmioty, pokrycie planu,
+limity, cache oraz historię po restarcie. Oba przykłady są sprawdzane przez
+rzeczywisty subprocess MCP. Test 150 niezależnych reguł przechodzi przy budżecie
+500 dopasowań; nie jest to benchmark wydajności.
